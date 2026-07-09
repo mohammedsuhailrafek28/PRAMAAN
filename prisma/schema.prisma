@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  MSME
+  BUYER
+  BANK
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  FLAGGED
+}
+
+enum DocumentType {
+  GST_CERTIFICATE
+  UDYAM_CERTIFICATE
+  BANK_STATEMENT
+}
+
+enum ConsentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REVOKED
+  EXPIRED
+}
+
+enum AuditAction {
+  REQUESTED
+  APPROVED
+  REJECTED
+  VIEWED
+  REVOKED
+  EXPIRED
+  PASSPORT_GENERATED
+  BUSINESS_VERIFIED
+}
+
+model User {
+  id               String           @id @default(cuid())
+  role             UserRole
+  name             String
+  organizationName String
+  email            String           @unique
+  passwordHash     String
+  createdAt        DateTime         @default(now())
+  business         Business?
+  consentRequests  ConsentRequest[] @relation("RequesterConsents")
+  auditLogs        AuditLog[]        @relation("ActorAuditLogs")
+  notifications    Notification[]
+}
+
+model Business {
+  id                 String             @id @default(cuid())
+  userId             String             @unique
+  legalName          String?
+  gstin              String?            @unique
+  udyamNumber        String?
+  pan                String?
+  address            String?
+  turnoverBand       String?
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  user               User               @relation(fields: [userId], references: [id])
+  documents          Document[]
+  passports          Passport[]
+  consentRequests    ConsentRequest[]
+  auditLogs          AuditLog[]
+}
+
+model Document {
+  id           String       @id @default(cuid())
+  businessId   String
+  docType      DocumentType
+  filePath     String
+  originalName String
+  mimeType     String
+  verifiedFlag Boolean      @default(false)
+  uploadedAt   DateTime     @default(now())
+  business     Business     @relation(fields: [businessId], references: [id])
+}
+
+model Passport {
+  id           String   @id @default(cuid())
+  businessId   String
+  version      Int
+  snapshotJson Json
+  generatedAt  DateTime @default(now())
+  business     Business @relation(fields: [businessId], references: [id])
+
+  @@unique([businessId, version])
+}
+
+model ConsentRequest {
+  id              String          @id @default(cuid())
+  requesterId     String
+  businessId      String
+  requestedFields Json
+  approvedFields  Json?
+  status          ConsentStatus   @default(PENDING)
+  durationDays    Int?
+  approvedAt      DateTime?
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime        @default(now())
+  requester       User            @relation("RequesterConsents", fields: [requesterId], references: [id])
+  business        Business        @relation(fields: [businessId], references: [id])
+  auditLogs       AuditLog[]
+  notifications   Notification[]
+}
+
+model AuditLog {
+  id               String          @id @default(cuid())
+  businessId       String
+  consentRequestId String?
+  actorId          String
+  action           AuditAction
+  metadata         Json?
+  createdAt        DateTime        @default(now())
+  business         Business        @relation(fields: [businessId], references: [id])
+  consentRequest   ConsentRequest? @relation(fields: [consentRequestId], references: [id])
+  actor            User            @relation("ActorAuditLogs", fields: [actorId], references: [id])
+}
+
+model Notification {
+  id               String          @id @default(cuid())
+  userId           String
+  message          String
+  readFlag         Boolean         @default(false)
+  relatedConsentId String?
+  createdAt        DateTime        @default(now())
+  user             User            @relation(fields: [userId], references: [id])
+  relatedConsent   ConsentRequest? @relation(fields: [relatedConsentId], references: [id])
+}

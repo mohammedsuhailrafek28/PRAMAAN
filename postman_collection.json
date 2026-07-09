@@ -1,0 +1,116 @@
+{
+  "info": {
+    "name": "Pramaan Backend MVP",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:4000" },
+    { "key": "msmeToken", "value": "" },
+    { "key": "buyerToken", "value": "" },
+    { "key": "consentId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth - Login MSME",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"email\":\"msme@pramaan.demo\",\"password\":\"password123\"}"
+        }
+      }
+    },
+    {
+      "name": "Auth - Login Buyer",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"email\":\"buyer@pramaan.demo\",\"password\":\"password123\"}"
+        }
+      }
+    },
+    {
+      "name": "MSME - Verify Business",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/business/verify"
+      }
+    },
+    {
+      "name": "MSME - Generate Passport",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/passport/generate"
+      }
+    },
+    {
+      "name": "Buyer - Request Consent",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{buyerToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/consent-requests",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"businessGstin\":\"33ABCDE1234F1Z5\",\"requestedFields\":[\"legalBusinessName\",\"gstin\",\"udyamNumber\",\"turnoverBand\",\"bankVerificationStatus\",\"complianceStatus\"]}"
+        }
+      }
+    },
+    {
+      "name": "MSME - Incoming Requests",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/consent-requests?scope=incoming"
+      }
+    },
+    {
+      "name": "MSME - Approve Consent",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{msmeToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/consent-requests/{{consentId}}/approve",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"approvedFields\":[\"legalBusinessName\",\"gstin\",\"udyamNumber\",\"complianceStatus\"],\"durationDays\":7}"
+        }
+      }
+    },
+    {
+      "name": "Buyer - Dynamic Trust View",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{buyerToken}}" }],
+        "url": "{{baseUrl}}/api/trust-view/{{consentId}}"
+      }
+    },
+    {
+      "name": "MSME - Revoke Consent",
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/consent-requests/{{consentId}}/revoke"
+      }
+    },
+    {
+      "name": "MSME - Audit Logs",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/audit-logs"
+      }
+    }
+  ]
+}
