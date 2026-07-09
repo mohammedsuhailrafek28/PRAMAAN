@@ -44,6 +44,24 @@ async function main() {
     email: "bank@pramaan.demo"
   });
 
+  const existingGstinOwner = await prisma.business.findUnique({
+    where: { gstin: "33ABCDE1234F1Z5" }
+  });
+  if (existingGstinOwner && existingGstinOwner.userId !== msme.id) {
+    const consents = await prisma.consentRequest.findMany({
+      where: { businessId: existingGstinOwner.id },
+      select: { id: true }
+    });
+    const consentIds = consents.map((consent) => consent.id);
+
+    await prisma.notification.deleteMany({ where: { relatedConsentId: { in: consentIds } } });
+    await prisma.auditLog.deleteMany({ where: { businessId: existingGstinOwner.id } });
+    await prisma.consentRequest.deleteMany({ where: { businessId: existingGstinOwner.id } });
+    await prisma.passport.deleteMany({ where: { businessId: existingGstinOwner.id } });
+    await prisma.document.deleteMany({ where: { businessId: existingGstinOwner.id } });
+    await prisma.business.delete({ where: { id: existingGstinOwner.id } });
+  }
+
   const business = await prisma.business.upsert({
     where: { userId: msme.id },
     update: {

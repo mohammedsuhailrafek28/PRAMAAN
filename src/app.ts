@@ -3,6 +3,7 @@ import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
 import { env } from "./config/env.js";
+import { prisma } from "./config/prisma.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import authRoutes from "./modules/auth/auth.routes.js";
 import businessRoutes from "./modules/business/business.routes.js";
@@ -19,8 +20,28 @@ app.use(cors({ origin: env.CORS_ORIGIN === "*" ? true : env.CORS_ORIGIN }));
 app.use(express.json());
 app.use(morgan("dev"));
 
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", service: "pramaan-backend" });
+async function healthResponse() {
+  let databaseReachable = true;
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+  } catch {
+    databaseReachable = false;
+  }
+
+  return {
+    status: databaseReachable ? "ok" : "degraded",
+    uptime: process.uptime(),
+    databaseReachable,
+    timestamp: new Date().toISOString()
+  };
+}
+
+app.get("/health", async (_req, res) => {
+  res.json(await healthResponse());
+});
+
+app.get("/api/health", async (_req, res) => {
+  res.json(await healthResponse());
 });
 
 app.use("/api/auth", authRoutes);

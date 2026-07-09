@@ -8,3 +8,4 @@ prisma/dev.db
 dev.db-journal
 .DS_Store
 *.log
+test-fixtures/
