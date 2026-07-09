@@ -155,9 +155,12 @@ async function main() {
 
   try {
     const health = await request("GET", "/api/health");
-    assert(health.data.status, "health status missing");
-    assert(typeof health.data.uptime === "number", "health uptime missing");
-    assert(health.data.databaseReachable === true, "database not reachable");
+    assert(health.data.status === "healthy", "health status is not healthy");
+    assert(health.data.service === "Pramaan Backend", "health service missing");
+    assert(health.data.version === "1.0.0", "health version missing");
+    assert(typeof health.data.uptimeSeconds === "number", "health uptime missing");
+    assert(health.data.database?.connected === true, "database not reachable");
+    assert(health.data.database?.provider === "sqlite", "database provider missing");
     assert(health.data.timestamp, "health timestamp missing");
     pass("A. health endpoint returns status, uptime, DB reachability, timestamp");
 

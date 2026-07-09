@@ -1,6 +1,19 @@
 # Pramaan Backend
 
-Pramaan is an MVP backend for consent-based business trust sharing for Indian MSMEs. It lets an MSME mock-verify business details once, generate a reusable Trust Passport, and share only approved fields with a buyer or bank through time-bound consent.
+Pramaan is a backend MVP for India's consent-based business trust infrastructure for MSMEs. It proves a narrow loop: an MSME verifies business information once, generates a reusable Trust Passport, and shares only explicitly approved fields with a buyer or bank for a time-bound duration.
+
+## MVP Scope
+
+This backend is intentionally deterministic and rule-based.
+
+- No frontend in this repository.
+- No LLM, OpenAI, Gemini, Claude, or other generative AI APIs.
+- No blockchain.
+- No lending decisions.
+- No marketplace.
+- No reputation or AI scoring.
+- No live GST, Udyam, or Account Aggregator integrations.
+- Buyer and bank users never receive raw uploaded documents.
 
 ## Stack
 
@@ -10,6 +23,9 @@ Pramaan is an MVP backend for consent-based business trust sharing for Indian MS
 - bcrypt password hashing
 - multer local uploads
 - Zod request validation
+- Swagger UI docs
+- pino structured request logging
+- helmet, CORS, and API rate limiting
 
 ## Setup
 
@@ -25,6 +41,37 @@ npm run dev
 The API runs at `http://localhost:4000`.
 
 Note: `npm run prisma:migrate -- --name init` is included, but on this Windows/Node 24 machine Prisma's schema engine failed silently even though the schema validates. `npm run db:init` creates the same local SQLite tables for the hackathon demo.
+
+## API Docs
+
+Interactive Swagger docs:
+
+```text
+http://localhost:4000/api/docs
+```
+
+Health endpoint:
+
+```text
+GET http://localhost:4000/api/health
+```
+
+Example health response:
+
+```json
+{
+  "status": "healthy",
+  "service": "Pramaan Backend",
+  "version": "1.0.0",
+  "environment": "development",
+  "uptimeSeconds": 123,
+  "database": {
+    "connected": true,
+    "provider": "sqlite"
+  },
+  "timestamp": "2026-07-09T08:00:00.000Z"
+}
+```
 
 ## Demo Accounts
 
@@ -50,29 +97,61 @@ Seeded MSME business:
 | `npm run dev` | Start the API in watch mode |
 | `npm run build` | Type-check and compile TypeScript |
 | `npm start` | Run compiled server |
+| `npm run smoke` | Run the real HTTP end-to-end smoke test |
 | `npm run prisma:generate` | Generate Prisma Client |
 | `npm run prisma:migrate` | Run Prisma migrations where supported |
-| `npm run db:init` | Initialize local SQLite demo DB without Prisma schema engine |
+| `npm run db:init` | Initialize local SQLite demo DB |
 | `npm run prisma:seed` | Seed demo users, business, and sample document rows |
 
-## Core Flow
+## Smoke Test
 
-1. Login as MSME.
-2. `POST /api/business/verify` runs mock verification.
-3. `POST /api/passport/generate` creates a versioned Trust Passport.
-4. Login as Buyer or Bank.
-5. `POST /api/consent-requests` requests fields by GSTIN.
-6. MSME lists incoming requests and approves a subset for a duration.
-7. Stakeholder calls `GET /api/trust-view/:consentRequestId`.
-8. MSME revokes consent.
-9. Stakeholder trust view is immediately blocked.
-10. MSME audit log shows requested, approved, viewed, revoked.
+Run the full backend verification sequence:
 
-## Important Scope Notes
+```bash
+npm install
+npm run prisma:generate
+npm run db:init
+npm run prisma:seed
+npm run build
+npm run smoke
+```
 
-- Verification is explicitly mock/rule-based. It validates GSTIN, Udyam, PAN formats and document presence.
-- No live GST, Udyam, Account Aggregator, lending, marketplace, blockchain, or AI scoring integrations are included.
-- Buyer and Bank users never receive raw uploaded documents and cannot fetch passports directly.
+The smoke script starts the real backend server on port `4100`, resets the local SQLite DB, and uses real HTTP requests with JWT auth and multipart document uploads.
+
+Smoke-tested flow:
+
+1. MSME registers and receives a JWT.
+2. Protected MSME route rejects unauthenticated access.
+3. MSME creates business profile.
+4. MSME uploads sample GST, Udyam, and bank documents.
+5. MSME runs mock rule-based verification.
+6. MSME generates Trust Passport.
+7. Buyer registers and requests selected fields by GSTIN.
+8. MSME sees incoming request and approves fewer fields than requested.
+9. Buyer opens Dynamic Trust View and receives only approved fields.
+10. Unauthorized users are blocked from the Trust View and owner passport.
+11. MSME revokes consent.
+12. Buyer receives `CONSENT_REVOKED`.
+13. Audit logs and notifications contain the lifecycle.
+
+## Running With Docker
+
+```bash
+docker compose up --build
+```
+
+Docker Compose starts the backend on `http://localhost:4000` and persists SQLite data plus uploaded files in named Docker volumes:
+
+- `pramaan-sqlite`
+- `pramaan-uploads`
+
+The container uses SQLite-first local persistence and does not require Postgres.
+
+To seed demo data inside the running container:
+
+```bash
+docker compose exec backend npm run prisma:seed
+```
 
 ## API Summary
 
@@ -80,6 +159,8 @@ All protected endpoints require `Authorization: Bearer <token>`.
 
 | Method | Path | Role |
 |---|---|---|
+| `GET` | `/api/health` | Public |
+| `GET` | `/api/docs` | Public |
 | `POST` | `/api/auth/register` | Public |
 | `POST` | `/api/auth/login` | Public |
 | `POST` | `/api/auth/logout` | Any authenticated |

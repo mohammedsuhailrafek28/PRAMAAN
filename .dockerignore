@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.env
+*.db
+prisma/dev.db
+uploads
+test-fixtures
+server*.log
+npm-debug.log
+.DS_Store

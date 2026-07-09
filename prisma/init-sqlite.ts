@@ -1,7 +1,16 @@
 import { DatabaseSync } from "node:sqlite";
+import "dotenv/config";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 
-const dbPath = path.resolve("prisma", "dev.db");
+function sqlitePathFromDatabaseUrl(databaseUrl?: string) {
+  if (!databaseUrl?.startsWith("file:")) return path.resolve("prisma", "dev.db");
+  const rawPath = databaseUrl.slice("file:".length);
+  return path.isAbsolute(rawPath) ? rawPath : path.resolve("prisma", rawPath);
+}
+
+const dbPath = sqlitePathFromDatabaseUrl(process.env.DATABASE_URL);
+mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new DatabaseSync(dbPath);
 
 db.exec(`

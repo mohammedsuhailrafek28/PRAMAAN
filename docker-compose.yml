@@ -1,0 +1,23 @@
+services:
+  backend:
+    build: .
+    container_name: pramaan-backend
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: file:/app/data/dev.db
+      JWT_SECRET: change-this-local-docker-secret
+      JWT_EXPIRES_IN: 7d
+      UPLOAD_DIR: /app/uploads
+      CORS_ORIGIN: http://localhost:5173,http://localhost:3000,http://localhost:4173
+      RATE_LIMIT_MAX: 1000
+      RATE_LIMIT_WINDOW_MS: 900000
+    ports:
+      - "4000:4000"
+    volumes:
+      - pramaan-sqlite:/app/data
+      - pramaan-uploads:/app/uploads
+
+volumes:
+  pramaan-sqlite:
+  pramaan-uploads:
