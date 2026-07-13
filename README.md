@@ -1,8 +1,10 @@
 # Pramaan Backend
 
-Pramaan is a backend MVP for India's consent-based business trust infrastructure for MSMEs. It proves a narrow loop: an MSME verifies business information once, generates a reusable Trust Passport, and shares only explicitly approved fields with a buyer or bank for a time-bound duration.
+Pramaan is reusable KYB trust infrastructure for MSMEs. The backend helps an MSME submit business claims, attach supporting evidence, run deterministic internal cross-checks, generate a Business Trust Profile, and share only approved profile fields with a buyer or bank for a time-bound duration.
 
-## MVP Scope
+The current MVP measures evidence quality and trust readiness. It does not decide whether a business is morally trustworthy, creditworthy, eligible for a loan, or suitable for a marketplace.
+
+## Trust OS Scope
 
 This backend is intentionally deterministic and rule-based.
 
@@ -11,9 +13,12 @@ This backend is intentionally deterministic and rule-based.
 - No blockchain.
 - No lending decisions.
 - No marketplace.
-- No reputation or AI scoring.
-- No live GST, Udyam, or Account Aggregator integrations.
+- No reputation, fraud, credit, or AI scoring.
+- No OCR or document-content parsing.
+- No live GST, Udyam, bank, Account Aggregator, DigiLocker, or government-registry verification.
 - Buyer and bank users never receive raw uploaded documents.
+
+Important truth rule: PRAMAAN does not mark submitted data as externally verified unless an authoritative source adapter has checked it. This MVP uses `SELF_DECLARED`, `DOCUMENT_SUBMITTED`, `CROSS_CHECKED`, `REJECTED`, and `EXPIRED`. `SOURCE_VERIFIED` is modeled for the future but is not produced by the current system.
 
 ## Stack
 
@@ -40,7 +45,7 @@ npm run dev
 
 The API runs at `http://localhost:4000`.
 
-Note: `npm run prisma:migrate -- --name init` is included, but on this Windows/Node 24 machine Prisma's schema engine failed silently even though the schema validates. `npm run db:init` creates the same local SQLite tables for the hackathon demo.
+Note: `npm run db:init` creates or updates the local SQLite demo tables, including Trust OS foundation columns. Prisma migration SQL is also documented under `prisma/migrations`.
 
 ## API Docs
 
@@ -54,23 +59,6 @@ Health endpoint:
 
 ```text
 GET http://localhost:4000/api/health
-```
-
-Example health response:
-
-```json
-{
-  "status": "healthy",
-  "service": "Pramaan Backend",
-  "version": "1.0.0",
-  "environment": "development",
-  "uptimeSeconds": 123,
-  "database": {
-    "connected": true,
-    "provider": "sqlite"
-  },
-  "timestamp": "2026-07-09T08:00:00.000Z"
-}
 ```
 
 ## Demo Accounts
@@ -90,6 +78,20 @@ Seeded MSME business:
 - Udyam: `UDYAM-TN-01-0001234`
 - PAN: `ABCDE1234F`
 
+## Trust OS Concepts
+
+| Concept | Meaning |
+|---|---|
+| Submitted claim | A value entered by the MSME, such as legal name, GSTIN, PAN, address, or turnover band |
+| Submitted evidence | A supporting uploaded file, such as GST certificate, Udyam certificate, or bank statement |
+| Document confidence | Deterministic assessment of upload metadata, supported MIME type, duplicates, expiry, and source-verification limitation |
+| Field confidence | Deterministic assessment of claim presence, syntax, relevant submitted evidence, internal consistency, and contradictions |
+| Profile completeness | Percentage of required claims and evidence currently present |
+| Evidence strength | Average support level across submitted evidence and supported claims |
+| Consistency | Penalty-based measure of detected contradictions |
+| Freshness | Whether submitted evidence is current or expired |
+| Trust readiness | Weighted summary: `0.30 completeness + 0.35 evidence strength + 0.25 consistency + 0.10 freshness` |
+
 ## Scripts
 
 | Script | Purpose |
@@ -97,15 +99,16 @@ Seeded MSME business:
 | `npm run dev` | Start the API in watch mode |
 | `npm run build` | Type-check and compile TypeScript |
 | `npm start` | Run compiled server |
+| `npm test` | Run deterministic Trust Engine tests |
 | `npm run smoke` | Run the real HTTP end-to-end smoke test |
 | `npm run prisma:generate` | Generate Prisma Client |
 | `npm run prisma:migrate` | Run Prisma migrations where supported |
-| `npm run db:init` | Initialize local SQLite demo DB |
+| `npm run db:init` | Initialize or update local SQLite demo DB |
 | `npm run prisma:seed` | Seed demo users, business, and sample document rows |
 
 ## Smoke Test
 
-Run the full backend verification sequence:
+Run the full backend Trust OS sequence:
 
 ```bash
 npm install
@@ -113,6 +116,7 @@ npm run prisma:generate
 npm run db:init
 npm run prisma:seed
 npm run build
+npm test
 npm run smoke
 ```
 
@@ -123,16 +127,17 @@ Smoke-tested flow:
 1. MSME registers and receives a JWT.
 2. Protected MSME route rejects unauthenticated access.
 3. MSME creates business profile.
-4. MSME uploads sample GST, Udyam, and bank documents.
-5. MSME runs mock rule-based verification.
-6. MSME generates Trust Passport.
-7. Buyer registers and requests selected fields by GSTIN.
-8. MSME sees incoming request and approves fewer fields than requested.
-9. Buyer opens Dynamic Trust View and receives only approved fields.
-10. Unauthorized users are blocked from the Trust View and owner passport.
-11. MSME revokes consent.
-12. Buyer receives `CONSENT_REVOKED`.
-13. Audit logs and notifications contain the lifecycle.
+4. MSME uploads GST, Udyam, and bank evidence files.
+5. MSME runs internal cross-checking.
+6. Trust metrics, field confidence, document confidence, gaps, and limitations are returned.
+7. MSME generates a Business Trust Profile.
+8. Buyer registers and requests selected fields by GSTIN.
+9. MSME sees incoming request and approves fewer fields than requested.
+10. Buyer opens Dynamic Trust View and receives only approved profile fields.
+11. Unauthorized users are blocked from the Trust View and owner profile.
+12. MSME revokes consent.
+13. Buyer receives `CONSENT_REVOKED`.
+14. Audit logs and notifications contain the lifecycle.
 
 ## Running With Docker
 
@@ -168,7 +173,8 @@ All protected endpoints require `Authorization: Bearer <token>`.
 | `GET` | `/api/business/me` | MSME |
 | `PATCH` | `/api/business/me` | MSME |
 | `POST` | `/api/business/documents` | MSME |
-| `POST` | `/api/business/verify` | MSME |
+| `POST` | `/api/business/cross-check` | MSME |
+| `POST` | `/api/business/verify` | MSME, deprecated alias for cross-check |
 | `POST` | `/api/passport/generate` | MSME |
 | `GET` | `/api/passport/me` | MSME |
 | `POST` | `/api/consent-requests` | Buyer, Bank |
@@ -181,6 +187,26 @@ All protected endpoints require `Authorization: Bearer <token>`.
 | `GET` | `/api/audit-logs` | MSME owner |
 | `GET` | `/api/notifications` | Any authenticated |
 | `PATCH` | `/api/notifications/:id/read` | Notification owner |
+
+## Business Trust Profile Shape
+
+`POST /api/passport/generate` stores a versioned Business Trust Profile in the existing Passport table to avoid unnecessary migration risk.
+
+The profile contains:
+
+- `summary.trustReadiness`
+- `summary.profileCompleteness`
+- `summary.evidenceStrength`
+- `summary.consistency`
+- `summary.freshness`
+- `fieldConfidence`
+- `documentConfidence`
+- `gaps`
+- `contradictions`
+- `limitations`
+- `sourceVerificationPerformed: false`
+
+The profile does not expose proof-like fields such as `gstinVerified: true`, `udyamVerified: true`, or `bankVerified: true`.
 
 ## Error Shape
 

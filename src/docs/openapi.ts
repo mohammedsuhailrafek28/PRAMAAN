@@ -4,7 +4,7 @@ export const openApiSpec = {
     title: "Pramaan Backend API",
     version: "1.0.0",
     description:
-      "Rule-based MVP API for Pramaan, India's consent-based business trust infrastructure for MSMEs."
+      "Rule-based Trust OS API for Pramaan, India's reusable KYB trust infrastructure for MSMEs. The MVP performs internal cross-checks only and does not perform live GST, Udyam, bank, Account Aggregator, DigiLocker, or government-registry verification."
   },
   servers: [{ url: "http://localhost:4000", description: "Local development" }],
   components: {
@@ -83,7 +83,7 @@ export const openApiSpec = {
           requestedFields: {
             type: "array",
             items: { type: "string" },
-            example: ["legalBusinessName", "gstin", "gstinVerified", "udyamNumber", "complianceStatus"]
+            example: ["legalBusinessName", "gstin", "udyamNumber", "summary", "limitations"]
           }
         }
       },
@@ -94,7 +94,7 @@ export const openApiSpec = {
           approvedFields: {
             type: "array",
             items: { type: "string" },
-            example: ["legalBusinessName", "gstin", "gstinVerified", "udyamNumber"]
+            example: ["legalBusinessName", "gstin", "udyamNumber", "summary"]
           },
           durationDays: { type: "integer", example: 7 }
         }
@@ -171,7 +171,7 @@ export const openApiSpec = {
     "/api/business/me": {
       get: {
         tags: ["Business"],
-        summary: "Fetch the authenticated MSME's business profile",
+        summary: "Fetch the authenticated MSME's business profile with concise Trust OS summary",
         security: [{ bearerAuth: [] }],
         responses: {
           "200": { description: "Business profile" },
@@ -198,7 +198,7 @@ export const openApiSpec = {
     "/api/business/documents": {
       post: {
         tags: ["Business"],
-        summary: "Upload a representative sample document",
+        summary: "Upload submitted evidence for internal assessment",
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -221,17 +221,29 @@ export const openApiSpec = {
     "/api/business/verify": {
       post: {
         tags: ["Business"],
-        summary: "Run mock rule-based business verification",
+        summary: "Deprecated alias for internal business cross-checking",
         security: [{ bearerAuth: [] }],
         responses: {
           "200": {
-            description: "Verification result",
+            description: "Internal cross-check result",
             content: {
               "application/json": {
                 example: {
-                  verificationStatus: "VERIFIED",
-                  fieldResults: [{ field: "gstin", status: "VERIFIED", message: "GSTIN format is valid and sample GST certificate is present." }],
-                  metadata: { verificationMode: "MOCK_RULE_BASED", liveGovernmentVerification: false }
+                  trustStatus: "CROSS_CHECKED",
+                  profile: {
+                    summary: {
+                      trustReadiness: 74,
+                      profileCompleteness: 90,
+                      evidenceStrength: 52,
+                      consistency: 100,
+                      freshness: 100
+                    },
+                    sourceVerificationPerformed: false,
+                    limitations: [
+                      "No authoritative GST, Udyam, bank, Account Aggregator, DigiLocker, or government registry source was queried."
+                    ]
+                  },
+                  metadata: { mode: "INTERNAL_CROSS_CHECK", sourceVerificationPerformed: false }
                 }
               }
             }
@@ -239,20 +251,32 @@ export const openApiSpec = {
         }
       }
     },
+    "/api/business/cross-check": {
+      post: {
+        tags: ["Business"],
+        summary: "Run deterministic internal cross-checks and calculate Trust OS metrics",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": {
+            description: "Trust OS cross-check result with field confidence, document confidence, gaps, contradictions, and metrics"
+          }
+        }
+      }
+    },
     "/api/passport/generate": {
       post: {
         tags: ["Passport"],
-        summary: "Generate a versioned Trust Passport",
+        summary: "Generate a versioned Business Trust Profile",
         security: [{ bearerAuth: [] }],
-        responses: { "201": { description: "Passport generated" } }
+        responses: { "201": { description: "Business Trust Profile generated" } }
       }
     },
     "/api/passport/me": {
       get: {
         tags: ["Passport"],
-        summary: "Fetch the MSME owner's latest full passport",
+        summary: "Fetch the MSME owner's latest Business Trust Profile",
         security: [{ bearerAuth: [] }],
-        responses: { "200": { description: "Latest passport" } }
+        responses: { "200": { description: "Latest Business Trust Profile" } }
       }
     },
     "/api/consent-requests": {
@@ -310,7 +334,7 @@ export const openApiSpec = {
     "/api/trust-view/{consentRequestId}": {
       get: {
         tags: ["Trust View"],
-        summary: "Requester fetches filtered passport fields",
+        summary: "Requester fetches approved Business Trust Profile fields",
         security: [{ bearerAuth: [] }],
         parameters: [{ name: "consentRequestId", in: "path", required: true, schema: { type: "string" } }],
         responses: {
@@ -322,10 +346,18 @@ export const openApiSpec = {
                   businessId: "business-id",
                   consentId: "consent-id",
                   sharedFields: {
-                    legalBusinessName: "Sharma Textiles",
-                    gstin: "33ABCDE1234F1Z5",
-                    gstinVerified: true,
-                    udyamNumber: "UDYAM-TN-01-0001234"
+                    legalBusinessName: {
+                      value: "Sharma Textiles",
+                      evidenceStatus: "SELF_DECLARED",
+                      confidence: 25,
+                      confidenceReason: "This claim is self-declared with confidence 25."
+                    },
+                    gstin: {
+                      value: "33ABCDE1234F1Z5",
+                      evidenceStatus: "CROSS_CHECKED",
+                      confidence: 60,
+                      confidenceReason: "Internal deterministic checks support this claim. No source verification was performed."
+                    }
                   },
                   metadata: { accessGrantedAt: "2026-07-09T08:00:00.000Z", expiresAt: "2026-07-16T08:00:00.000Z" }
                 }

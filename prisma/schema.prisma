@@ -20,6 +20,15 @@ enum VerificationStatus {
   FLAGGED
 }
 
+enum EvidenceStatus {
+  SELF_DECLARED
+  DOCUMENT_SUBMITTED
+  CROSS_CHECKED
+  SOURCE_VERIFIED
+  REJECTED
+  EXPIRED
+}
+
 enum DocumentType {
   GST_CERTIFICATE
   UDYAM_CERTIFICATE
@@ -43,6 +52,17 @@ enum AuditAction {
   EXPIRED
   PASSPORT_GENERATED
   BUSINESS_VERIFIED
+  BUSINESS_PROFILE_CREATED
+  BUSINESS_PROFILE_UPDATED
+  DOCUMENT_SUBMITTED
+  BUSINESS_CROSS_CHECKED
+  EVIDENCE_GAP_FOUND
+  CONTRADICTION_FOUND
+  TRUST_PROFILE_GENERATED
+  CONSENT_REQUESTED
+  CONSENT_APPROVED
+  TRUST_PROFILE_VIEWED
+  CONSENT_REVOKED
 }
 
 model User {
@@ -69,6 +89,9 @@ model Business {
   address            String?
   turnoverBand       String?
   verificationStatus VerificationStatus @default(UNVERIFIED)
+  trustStatus        EvidenceStatus     @default(SELF_DECLARED)
+  trustSummary       Json?
+  lastCrossCheckedAt DateTime?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   user               User               @relation(fields: [userId], references: [id])
@@ -86,6 +109,14 @@ model Document {
   originalName String
   mimeType     String
   verifiedFlag Boolean      @default(false)
+  evidenceStatus EvidenceStatus @default(DOCUMENT_SUBMITTED)
+  confidence     Int            @default(0)
+  confidenceReason String?
+  crossCheckMethod String?
+  source          String?
+  checkedAt       DateTime?
+  expiresAt       DateTime?
+  contradictionDetails Json?
   uploadedAt   DateTime     @default(now())
   business     Business     @relation(fields: [businessId], references: [id])
 }

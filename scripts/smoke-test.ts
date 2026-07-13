@@ -202,15 +202,20 @@ async function main() {
     assert(gstUpload.data.documentId && udyamUpload.data.documentId && bankUpload.data.documentId, "document IDs missing");
     pass("D. multipart document uploads are recorded");
 
-    const verification = await request("POST", "/api/business/verify", { token: msmeToken });
-    const fields = verification.data.fieldResults.map((item: Json) => item.field);
-    assert(verification.data.verificationStatus === "VERIFIED", "business not verified");
+    const crossCheck = await request("POST", "/api/business/cross-check", { token: msmeToken });
+    const fields = crossCheck.data.profile.fieldConfidence.map((item: Json) => item.field);
+    assert(crossCheck.data.trustStatus === "CROSS_CHECKED", "business not internally cross-checked");
     assert(fields.includes("gstin"), "GSTIN result missing");
     assert(fields.includes("pan"), "PAN result missing");
     assert(fields.includes("udyamNumber"), "Udyam result missing");
-    assert(fields.includes("bankStatement"), "document-present check missing");
-    assert(verification.data.metadata?.liveGovernmentVerification === false, "response claims live government verification");
-    pass("E. rule-based verification marks business VERIFIED without live government claims");
+    assert(crossCheck.data.profile.documentConfidence.length >= 3, "document confidence checks missing");
+    assert(crossCheck.data.profile.summary.trustReadiness >= 0, "trust readiness missing");
+    assert(crossCheck.data.profile.sourceVerificationPerformed === false, "response claims source verification");
+    assert(
+      !crossCheck.data.profile.fieldConfidence.some((item: Json) => item.status === "SOURCE_VERIFIED"),
+      "SOURCE_VERIFIED was produced without a source adapter"
+    );
+    pass("E. internal cross-check returns field confidence, document confidence, and trust metrics");
 
     const passportCreate = await request("POST", "/api/passport/generate", { token: msmeToken });
     assert(passportCreate.data.passportId, "passport ID missing");
@@ -219,17 +224,17 @@ async function main() {
     for (const field of [
       "legalBusinessName",
       "gstin",
-      "gstinVerified",
       "udyamNumber",
-      "udyamVerified",
-      "panMasked",
-      "turnoverBand",
+      "summary",
+      "fieldConfidence",
+      "documentConfidence",
       "generatedAt",
       "version"
     ]) {
       assert(Object.prototype.hasOwnProperty.call(snapshot, field), `passport snapshot missing ${field}`);
     }
-    pass("F. passport generation and owner fetch return required snapshot fields");
+    assert(snapshot.sourceVerificationPerformed === false, "profile claims source verification");
+    pass("F. Business Trust Profile generation and owner fetch return evidence-backed snapshot fields");
 
     const buyerRegistration = await request("POST", "/api/auth/register", {
       body: {
@@ -248,7 +253,7 @@ async function main() {
       token: buyerToken,
       body: {
         businessGstin: businessInput.gstin,
-        requestedFields: ["legalBusinessName", "gstin", "gstinVerified", "udyamNumber", "complianceStatus"]
+        requestedFields: ["legalBusinessName", "gstin", "udyamNumber", "summary", "limitations"]
       }
     });
     const consentId = consentCreate.data.consentRequestId;
@@ -259,8 +264,8 @@ async function main() {
       "MSME request notification missing"
     );
     let audit = await request("GET", "/api/audit-logs", { token: msmeToken });
-    assert(getActions(audit.data).includes("REQUESTED"), "REQUESTED audit missing");
-    pass("H. buyer creates pending consent request, MSME notification and REQUESTED audit exist");
+    assert(getActions(audit.data).includes("CONSENT_REQUESTED"), "CONSENT_REQUESTED audit missing");
+    pass("H. buyer creates pending consent request, MSME notification and CONSENT_REQUESTED audit exist");
 
     const incoming = await request("GET", "/api/consent-requests?scope=incoming", { token: msmeToken });
     assert(incoming.data.requests.some((item: Json) => item.id === consentId), "incoming request missing");
@@ -269,7 +274,7 @@ async function main() {
     const approve = await request("PATCH", `/api/consent-requests/${consentId}/approve`, {
       token: msmeToken,
       body: {
-        approvedFields: ["legalBusinessName", "gstin", "gstinVerified", "udyamNumber"],
+        approvedFields: ["legalBusinessName", "gstin", "udyamNumber", "summary"],
         durationDays: 7
       }
     });
@@ -281,27 +286,31 @@ async function main() {
       "buyer approval notification missing"
     );
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
-    assert(getActions(audit.data).includes("APPROVED"), "APPROVED audit missing");
+    assert(getActions(audit.data).includes("CONSENT_APPROVED"), "CONSENT_APPROVED audit missing");
     pass("J. MSME approves selected fields only and approval is audited/notified");
 
     const trustView = await request("GET", `/api/trust-view/${consentId}`, { token: buyerToken });
     const sharedKeys = Object.keys(trustView.data.sharedFields);
-    const expectedShared = ["legalBusinessName", "gstin", "gstinVerified", "udyamNumber"];
+    const expectedShared = ["legalBusinessName", "gstin", "udyamNumber", "summary"];
     assert(sharedKeys.length === expectedShared.length, `unexpected shared field count: ${sharedKeys.join(",")}`);
     for (const field of expectedShared) assert(sharedKeys.includes(field), `approved field missing: ${field}`);
+    assert(trustView.data.sharedFields.gstin.evidenceStatus, "approved field missing evidence status");
+    assert(typeof trustView.data.sharedFields.gstin.confidence === "number", "approved field missing confidence");
+    assert(trustView.data.sharedFields.gstin.confidenceReason, "approved field missing confidence reason");
     for (const forbidden of [
       "documents",
       "rawDocuments",
       "pan",
-      "panMasked",
       "turnoverBand",
-      "bankVerificationStatus",
-      "complianceStatus"
+      "bankAccount",
+      "fieldConfidence",
+      "documentConfidence",
+      "limitations"
     ]) {
       assert(!sharedKeys.includes(forbidden), `unapproved field leaked: ${forbidden}`);
     }
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
-    assert(getActions(audit.data).includes("VIEWED"), "VIEWED audit missing");
+    assert(getActions(audit.data).includes("TRUST_PROFILE_VIEWED"), "TRUST_PROFILE_VIEWED audit missing");
     pass("K. buyer dynamic trust view returns only approved fields and records VIEWED");
 
     const otherBuyer = await request("POST", "/api/auth/register", {
@@ -338,7 +347,7 @@ async function main() {
       "buyer revoke notification missing"
     );
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
-    assert(getActions(audit.data).includes("REVOKED"), "REVOKED audit missing");
+    assert(getActions(audit.data).includes("CONSENT_REVOKED"), "CONSENT_REVOKED audit missing");
     pass("M. MSME revokes consent and revocation is audited/notified");
 
     const revokedView = await expectBlocked(
@@ -353,7 +362,14 @@ async function main() {
 
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
     const actions = getActions(audit.data);
-    for (const action of ["BUSINESS_VERIFIED", "PASSPORT_GENERATED", "REQUESTED", "APPROVED", "VIEWED", "REVOKED"]) {
+    for (const action of [
+      "BUSINESS_CROSS_CHECKED",
+      "TRUST_PROFILE_GENERATED",
+      "CONSENT_REQUESTED",
+      "CONSENT_APPROVED",
+      "TRUST_PROFILE_VIEWED",
+      "CONSENT_REVOKED"
+    ]) {
       assert(actions.includes(action), `audit lifecycle missing ${action}`);
     }
     pass("O. audit lifecycle contains all required actions");

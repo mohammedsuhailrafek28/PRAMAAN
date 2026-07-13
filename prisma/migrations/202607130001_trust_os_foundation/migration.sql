@@ -1,36 +1,25 @@
-import { DatabaseSync } from "node:sqlite";
-import "dotenv/config";
-import { mkdirSync } from "node:fs";
-import path from "node:path";
+-- Trust OS foundation baseline migration.
+-- This repository previously used prisma/init-sqlite.ts instead of checked-in migrations.
+-- For existing local SQLite files, prisma/init-sqlite.ts adds the new Trust OS columns
+-- without mapping historical uploads to SOURCE_VERIFIED.
 
-function sqlitePathFromDatabaseUrl(databaseUrl?: string) {
-  if (!databaseUrl?.startsWith("file:")) return path.resolve("prisma", "dev.db");
-  const rawPath = databaseUrl.slice("file:".length);
-  return path.isAbsolute(rawPath) ? rawPath : path.resolve("prisma", rawPath);
-}
-
-const dbPath = sqlitePathFromDatabaseUrl(process.env.DATABASE_URL);
-mkdirSync(path.dirname(dbPath), { recursive: true });
-const db = new DatabaseSync(dbPath);
-
-db.exec(`
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS "User" (
+CREATE TABLE "User" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "role" TEXT NOT NULL,
   "name" TEXT NOT NULL,
   "organizationName" TEXT NOT NULL,
-  "email" TEXT NOT NULL UNIQUE,
+  "email" TEXT NOT NULL,
   "passwordHash" TEXT NOT NULL,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS "Business" (
+CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+
+CREATE TABLE "Business" (
   "id" TEXT NOT NULL PRIMARY KEY,
-  "userId" TEXT NOT NULL UNIQUE,
+  "userId" TEXT NOT NULL,
   "legalName" TEXT,
-  "gstin" TEXT UNIQUE,
+  "gstin" TEXT,
   "udyamNumber" TEXT,
   "pan" TEXT,
   "address" TEXT,
@@ -44,7 +33,10 @@ CREATE TABLE IF NOT EXISTS "Business" (
   CONSTRAINT "Business_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS "Document" (
+CREATE UNIQUE INDEX "Business_userId_key" ON "Business"("userId");
+CREATE UNIQUE INDEX "Business_gstin_key" ON "Business"("gstin");
+
+CREATE TABLE "Document" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "businessId" TEXT NOT NULL,
   "docType" TEXT NOT NULL,
@@ -64,7 +56,7 @@ CREATE TABLE IF NOT EXISTS "Document" (
   CONSTRAINT "Document_businessId_fkey" FOREIGN KEY ("businessId") REFERENCES "Business" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS "Passport" (
+CREATE TABLE "Passport" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "businessId" TEXT NOT NULL,
   "version" INTEGER NOT NULL,
@@ -73,9 +65,9 @@ CREATE TABLE IF NOT EXISTS "Passport" (
   CONSTRAINT "Passport_businessId_fkey" FOREIGN KEY ("businessId") REFERENCES "Business" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS "Passport_businessId_version_key" ON "Passport"("businessId", "version");
+CREATE UNIQUE INDEX "Passport_businessId_version_key" ON "Passport"("businessId", "version");
 
-CREATE TABLE IF NOT EXISTS "ConsentRequest" (
+CREATE TABLE "ConsentRequest" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "requesterId" TEXT NOT NULL,
   "businessId" TEXT NOT NULL,
@@ -91,7 +83,7 @@ CREATE TABLE IF NOT EXISTS "ConsentRequest" (
   CONSTRAINT "ConsentRequest_businessId_fkey" FOREIGN KEY ("businessId") REFERENCES "Business" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS "AuditLog" (
+CREATE TABLE "AuditLog" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "businessId" TEXT NOT NULL,
   "consentRequestId" TEXT,
@@ -104,7 +96,7 @@ CREATE TABLE IF NOT EXISTS "AuditLog" (
   CONSTRAINT "AuditLog_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS "Notification" (
+CREATE TABLE "Notification" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "userId" TEXT NOT NULL,
   "message" TEXT NOT NULL,
@@ -114,29 +106,3 @@ CREATE TABLE IF NOT EXISTS "Notification" (
   CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT "Notification_relatedConsentId_fkey" FOREIGN KEY ("relatedConsentId") REFERENCES "ConsentRequest" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
-`);
-
-const existingColumns = (tableName: string) =>
-  db.prepare(`PRAGMA table_info("${tableName}")`).all() as Array<{ name: string }>;
-
-const ensureColumn = (tableName: string, columnName: string, definition: string) => {
-  const hasColumn = existingColumns(tableName).some((column) => column.name === columnName);
-  if (!hasColumn) {
-    db.exec(`ALTER TABLE "${tableName}" ADD COLUMN "${columnName}" ${definition};`);
-  }
-};
-
-ensureColumn("Business", "trustStatus", "TEXT NOT NULL DEFAULT 'SELF_DECLARED'");
-ensureColumn("Business", "trustSummary", "JSONB");
-ensureColumn("Business", "lastCrossCheckedAt", "DATETIME");
-ensureColumn("Document", "evidenceStatus", "TEXT NOT NULL DEFAULT 'DOCUMENT_SUBMITTED'");
-ensureColumn("Document", "confidence", "INTEGER NOT NULL DEFAULT 0");
-ensureColumn("Document", "confidenceReason", "TEXT");
-ensureColumn("Document", "crossCheckMethod", "TEXT");
-ensureColumn("Document", "source", "TEXT");
-ensureColumn("Document", "checkedAt", "DATETIME");
-ensureColumn("Document", "expiresAt", "DATETIME");
-ensureColumn("Document", "contradictionDetails", "JSONB");
-
-db.close();
-console.log(`Initialized SQLite database at ${dbPath}`);

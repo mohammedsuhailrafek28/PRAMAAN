@@ -1,6 +1,6 @@
 {
   "info": {
-    "name": "Pramaan Backend MVP",
+    "name": "Pramaan Trust OS Backend",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -35,15 +35,15 @@
       }
     },
     {
-      "name": "MSME - Verify Business",
+      "name": "MSME - Internal Cross-Check",
       "request": {
         "method": "POST",
         "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
-        "url": "{{baseUrl}}/api/business/verify"
+        "url": "{{baseUrl}}/api/business/cross-check"
       }
     },
     {
-      "name": "MSME - Generate Passport",
+      "name": "MSME - Generate Business Trust Profile",
       "request": {
         "method": "POST",
         "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
@@ -61,7 +61,7 @@
         "url": "{{baseUrl}}/api/consent-requests",
         "body": {
           "mode": "raw",
-          "raw": "{\"businessGstin\":\"33ABCDE1234F1Z5\",\"requestedFields\":[\"legalBusinessName\",\"gstin\",\"udyamNumber\",\"turnoverBand\",\"bankVerificationStatus\",\"complianceStatus\"]}"
+          "raw": "{\"businessGstin\":\"33ABCDE1234F1Z5\",\"requestedFields\":[\"legalBusinessName\",\"gstin\",\"udyamNumber\",\"summary\",\"limitations\"]}"
         }
       }
     },
@@ -84,7 +84,7 @@
         "url": "{{baseUrl}}/api/consent-requests/{{consentId}}/approve",
         "body": {
           "mode": "raw",
-          "raw": "{\"approvedFields\":[\"legalBusinessName\",\"gstin\",\"udyamNumber\",\"complianceStatus\"],\"durationDays\":7}"
+          "raw": "{\"approvedFields\":[\"legalBusinessName\",\"gstin\",\"udyamNumber\",\"summary\"],\"durationDays\":7}"
         }
       }
     },

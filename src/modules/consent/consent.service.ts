@@ -50,13 +50,13 @@ export async function create(user: Express.User, input: { businessGstin: string;
     businessId: business.id,
     actorId: user.id,
     consentRequestId: consent.id,
-    action: AuditAction.REQUESTED,
+    action: AuditAction.CONSENT_REQUESTED,
     metadata: { requestedFields: input.requestedFields }
   });
   await createNotification({
     userId: business.userId,
     relatedConsentId: consent.id,
-    message: `${consent.requester.organizationName} wants to view your Trust Passport.`
+    message: `${consent.requester.organizationName} wants to view your Business Trust Profile.`
   });
 
   return consent;
@@ -114,13 +114,13 @@ export async function approve(userId: string, consentId: string, input: { approv
     businessId: consent.businessId,
     actorId: userId,
     consentRequestId: consentId,
-    action: AuditAction.APPROVED,
+    action: AuditAction.CONSENT_APPROVED,
     metadata: { approvedFields: input.approvedFields, durationDays: input.durationDays, expiresAt }
   });
   await createNotification({
     userId: consent.requesterId,
     relatedConsentId: consentId,
-    message: `${consent.business.legalName} granted access to its Trust Passport.`
+    message: `${consent.business.legalName} granted access to its Business Trust Profile.`
   });
 
   return updated;
@@ -144,7 +144,7 @@ export async function reject(userId: string, consentId: string) {
   await createNotification({
     userId: consent.requesterId,
     relatedConsentId: consentId,
-    message: `${consent.business.legalName} declined your Trust Passport request.`
+    message: `${consent.business.legalName} declined your Business Trust Profile request.`
   });
   return updated;
 }
@@ -162,12 +162,12 @@ export async function revoke(userId: string, consentId: string) {
     businessId: consent.businessId,
     actorId: userId,
     consentRequestId: consentId,
-    action: AuditAction.REVOKED
+    action: AuditAction.CONSENT_REVOKED
   });
   await createNotification({
     userId: consent.requesterId,
     relatedConsentId: consentId,
-    message: `${consent.business.legalName} revoked Trust Passport access.`
+    message: `${consent.business.legalName} revoked Business Trust Profile access.`
   });
   return updated;
 }
