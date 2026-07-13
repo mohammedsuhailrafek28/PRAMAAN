@@ -66,6 +66,22 @@
       }
     },
     {
+      "name": "Readiness - List Profiles",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/readiness-profiles"
+      }
+    },
+    {
+      "name": "Readiness - Evaluate Vendor Onboarding",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/readiness-profiles/vendor-onboarding/evaluate"
+      }
+    },
+    {
       "name": "MSME - Incoming Requests",
       "request": {
         "method": "GET",

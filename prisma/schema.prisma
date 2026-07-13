@@ -29,6 +29,15 @@ enum EvidenceStatus {
   EXPIRED
 }
 
+enum ReadinessLevel {
+  NOT_READY
+  EARLY_STAGE
+  PARTIALLY_READY
+  MOSTLY_READY
+  READY_FOR_REVIEW
+  BLOCKED
+}
+
 enum DocumentType {
   GST_CERTIFICATE
   UDYAM_CERTIFICATE
@@ -63,6 +72,9 @@ enum AuditAction {
   CONSENT_APPROVED
   TRUST_PROFILE_VIEWED
   CONSENT_REVOKED
+  READINESS_PROFILE_EVALUATED
+  READINESS_PROFILE_BLOCKED
+  READINESS_PROFILE_SHARED
 }
 
 model User {
@@ -99,6 +111,7 @@ model Business {
   passports          Passport[]
   consentRequests    ConsentRequest[]
   auditLogs          AuditLog[]
+  readinessEvaluations ReadinessEvaluation[]
 }
 
 model Document {
@@ -172,4 +185,17 @@ model Notification {
   createdAt        DateTime        @default(now())
   user             User            @relation(fields: [userId], references: [id])
   relatedConsent   ConsentRequest? @relation(fields: [relatedConsentId], references: [id])
+}
+
+model ReadinessEvaluation {
+  id             String         @id @default(cuid())
+  businessId     String
+  profileId      String
+  profileVersion String
+  score          Int
+  level          ReadinessLevel
+  blocked        Boolean
+  summaryJson    Json
+  evaluatedAt    DateTime       @default(now())
+  business       Business       @relation(fields: [businessId], references: [id])
 }

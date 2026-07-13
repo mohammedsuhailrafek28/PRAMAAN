@@ -16,6 +16,18 @@ export const openApiSpec = {
       }
     },
     schemas: {
+      ReadinessPurpose: {
+        type: "string",
+        enum: ["VENDOR_ONBOARDING", "LOAN_APPLICATION_PREPARATION", "GOVERNMENT_PROCUREMENT", "GOVERNMENT_SCHEME_APPLICATION"]
+      },
+      RequirementStatus: {
+        type: "string",
+        enum: ["SATISFIED", "PARTIALLY_SATISFIED", "MISSING", "BLOCKED", "MANUAL_REVIEW", "NOT_APPLICABLE"]
+      },
+      ReadinessLevel: {
+        type: "string",
+        enum: ["NOT_READY", "EARLY_STAGE", "PARTIALLY_READY", "MOSTLY_READY", "READY_FOR_REVIEW", "BLOCKED"]
+      },
       ErrorResponse: {
         type: "object",
         properties: {
@@ -366,6 +378,118 @@ export const openApiSpec = {
           },
           "410": { description: "Consent expired or revoked", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
         }
+      }
+    },
+    "/api/readiness-profiles": {
+      get: {
+        tags: ["Readiness"],
+        summary: "List available purpose-specific readiness preparation profiles",
+        description:
+          "Returns version-controlled policy profiles. Readiness is based on submitted evidence and internal checks; it is not approval, eligibility, creditworthiness, or external verification.",
+        responses: {
+          "200": {
+            description: "Available readiness profiles",
+            content: {
+              "application/json": {
+                example: {
+                  profiles: [
+                    {
+                      id: "vendor-onboarding",
+                      version: "1.0",
+                      name: "Vendor Onboarding Readiness",
+                      purpose: "VENDOR_ONBOARDING",
+                      description: "Evaluates preparation for B2B vendor onboarding.",
+                      disclaimer: "Final buyer requirements vary."
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/readiness-profiles/{profileId}": {
+      get: {
+        tags: ["Readiness"],
+        summary: "Fetch a full readiness profile definition",
+        parameters: [{ name: "profileId", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "Readiness profile definition including requirements, blockers, thresholds, and disclaimer" },
+          "404": { description: "Unknown profile", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/readiness-profiles/{profileId}/evaluate": {
+      post: {
+        tags: ["Readiness"],
+        summary: "Evaluate an MSME against a selected readiness preparation profile",
+        description:
+          "MSME-only private evaluation. Reuses the Business Trust Profile, recalculates Trust OS data safely, persists an explainable summary, and writes audit events. It does not claim approval, eligibility, creditworthiness, vendor acceptance, tender qualification, or source verification.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "profileId", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "201": {
+            description: "Readiness evaluation",
+            content: {
+              "application/json": {
+                example: {
+                  profile: {
+                    id: "vendor-onboarding",
+                    version: "1.0",
+                    name: "Vendor Onboarding Readiness",
+                    purpose: "VENDOR_ONBOARDING",
+                    disclaimer: "Final buyer requirements vary."
+                  },
+                  result: {
+                    score: 78,
+                    level: "MOSTLY_READY",
+                    blocked: false,
+                    satisfiedRequirements: 7,
+                    partialRequirements: 1,
+                    missingRequirements: 1,
+                    totalApplicableRequirements: 9
+                  },
+                  requirements: [
+                    {
+                      requirementId: "vendor_gstin",
+                      status: "SATISFIED",
+                      score: 100,
+                      reason: "GSTIN satisfies the configured confidence and evidence-status requirement."
+                    }
+                  ],
+                  blockingIssues: [],
+                  nextActions: [],
+                  limitations: [
+                    "This readiness profile is a preparation guide, not an approval, eligibility, creditworthiness, or acceptance decision."
+                  ]
+                }
+              }
+            }
+          },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { description: "Business or profile not found", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/readiness-profiles/{profileId}/latest": {
+      get: {
+        tags: ["Readiness"],
+        summary: "Fetch the authenticated MSME's latest persisted readiness evaluation for a profile",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "profileId", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "Latest persisted readiness evaluation" },
+          "404": { description: "No evaluation found", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/readiness-profiles/evaluations": {
+      get: {
+        tags: ["Readiness"],
+        summary: "Fetch the authenticated MSME's readiness evaluation history",
+        security: [{ bearerAuth: [] }],
+        responses: { "200": { description: "Evaluation history" } }
       }
     },
     "/api/audit-logs": {

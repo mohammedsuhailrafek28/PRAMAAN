@@ -114,6 +114,19 @@ CREATE TABLE IF NOT EXISTS "Notification" (
   CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT "Notification_relatedConsentId_fkey" FOREIGN KEY ("relatedConsentId") REFERENCES "ConsentRequest" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS "ReadinessEvaluation" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "businessId" TEXT NOT NULL,
+  "profileId" TEXT NOT NULL,
+  "profileVersion" TEXT NOT NULL,
+  "score" INTEGER NOT NULL,
+  "level" TEXT NOT NULL,
+  "blocked" BOOLEAN NOT NULL,
+  "summaryJson" JSONB NOT NULL,
+  "evaluatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "ReadinessEvaluation_businessId_fkey" FOREIGN KEY ("businessId") REFERENCES "Business" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
 `);
 
 const existingColumns = (tableName: string) =>

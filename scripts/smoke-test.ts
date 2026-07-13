@@ -195,12 +195,10 @@ async function main() {
 
     const gstFile = createFixture("gst-certificate.pdf", "%PDF-1.4 smoke GST certificate\n");
     const udyamFile = createFixture("udyam-certificate.pdf", "%PDF-1.4 smoke Udyam certificate\n");
-    const bankFile = createFixture("bank-statement.pdf", "%PDF-1.4 smoke bank statement\n");
     const gstUpload = await uploadDocument(msmeToken, "GST_CERTIFICATE", gstFile);
     const udyamUpload = await uploadDocument(msmeToken, "UDYAM_CERTIFICATE", udyamFile);
-    const bankUpload = await uploadDocument(msmeToken, "BANK_STATEMENT", bankFile);
-    assert(gstUpload.data.documentId && udyamUpload.data.documentId && bankUpload.data.documentId, "document IDs missing");
-    pass("D. multipart document uploads are recorded");
+    assert(gstUpload.data.documentId && udyamUpload.data.documentId, "document IDs missing");
+    pass("D. multipart identity document uploads are recorded");
 
     const crossCheck = await request("POST", "/api/business/cross-check", { token: msmeToken });
     const fields = crossCheck.data.profile.fieldConfidence.map((item: Json) => item.field);
@@ -208,7 +206,7 @@ async function main() {
     assert(fields.includes("gstin"), "GSTIN result missing");
     assert(fields.includes("pan"), "PAN result missing");
     assert(fields.includes("udyamNumber"), "Udyam result missing");
-    assert(crossCheck.data.profile.documentConfidence.length >= 3, "document confidence checks missing");
+    assert(crossCheck.data.profile.documentConfidence.length >= 2, "document confidence checks missing");
     assert(crossCheck.data.profile.summary.trustReadiness >= 0, "trust readiness missing");
     assert(crossCheck.data.profile.sourceVerificationPerformed === false, "response claims source verification");
     assert(
@@ -236,6 +234,33 @@ async function main() {
     assert(snapshot.sourceVerificationPerformed === false, "profile claims source verification");
     pass("F. Business Trust Profile generation and owner fetch return evidence-backed snapshot fields");
 
+    const profileList = await request("GET", "/api/readiness-profiles");
+    assert(profileList.data.profiles.length === 4, "readiness profiles missing");
+    pass("G. available readiness profiles are listed");
+
+    const vendorReadiness = await request("POST", "/api/readiness-profiles/vendor-onboarding/evaluate", { token: msmeToken });
+    assert(typeof vendorReadiness.data.result.score === "number", "vendor readiness score missing");
+    assert(vendorReadiness.data.result.level, "vendor readiness level missing");
+    assert(vendorReadiness.data.requirements.length > 0, "vendor requirements missing");
+    assert(vendorReadiness.data.nextActions.length > 0, "vendor next actions missing");
+    assert(vendorReadiness.data.requirements.some((item: Json) => item.requirementId === "vendor_bank_evidence" && item.status === "MISSING"), "missing bank evidence requirement not detected");
+    pass("H. Vendor Onboarding Readiness returns score, level, requirements, missing item, and next actions");
+
+    const loanReadiness = await request("POST", "/api/readiness-profiles/loan-application-preparation/evaluate", { token: msmeToken });
+    assert(loanReadiness.data.profile.purpose === "LOAN_APPLICATION_PREPARATION", "loan readiness purpose mismatch");
+    assert(loanReadiness.data.result.score !== vendorReadiness.data.result.score || loanReadiness.data.requirements.length !== vendorReadiness.data.requirements.length, "purpose-specific readiness result did not differ");
+    pass("I. Loan Application Preparation produces a different purpose-specific result");
+
+    const bankFile = createFixture("bank-statement.pdf", "%PDF-1.4 smoke bank statement\n");
+    const bankUpload = await uploadDocument(msmeToken, "BANK_STATEMENT", bankFile);
+    assert(bankUpload.data.documentId, "bank document ID missing");
+    await request("POST", "/api/business/cross-check", { token: msmeToken });
+    await request("POST", "/api/passport/generate", { token: msmeToken });
+    const improvedVendorReadiness = await request("POST", "/api/readiness-profiles/vendor-onboarding/evaluate", { token: msmeToken });
+    assert(improvedVendorReadiness.data.result.score >= vendorReadiness.data.result.score, "vendor readiness did not improve after bank evidence");
+    assert(!improvedVendorReadiness.data.requirements.some((item: Json) => item.requirementId === "vendor_bank_evidence" && item.status === "MISSING"), "bank evidence remained missing after upload");
+    pass("J. adding missing bank evidence improves the relevant readiness result");
+
     const buyerRegistration = await request("POST", "/api/auth/register", {
       body: {
         role: "BUYER",
@@ -247,7 +272,7 @@ async function main() {
     });
     const buyerToken = buyerRegistration.data.token;
     assert(buyerToken, "Buyer token missing");
-    pass("G. buyer auth returns JWT");
+    pass("K. buyer auth returns JWT");
 
     const consentCreate = await request("POST", "/api/consent-requests", {
       token: buyerToken,
@@ -265,11 +290,11 @@ async function main() {
     );
     let audit = await request("GET", "/api/audit-logs", { token: msmeToken });
     assert(getActions(audit.data).includes("CONSENT_REQUESTED"), "CONSENT_REQUESTED audit missing");
-    pass("H. buyer creates pending consent request, MSME notification and CONSENT_REQUESTED audit exist");
+    pass("L. buyer creates pending consent request, MSME notification and CONSENT_REQUESTED audit exist");
 
     const incoming = await request("GET", "/api/consent-requests?scope=incoming", { token: msmeToken });
     assert(incoming.data.requests.some((item: Json) => item.id === consentId), "incoming request missing");
-    pass("I. MSME sees incoming buyer request");
+    pass("M. MSME sees incoming buyer request");
 
     const approve = await request("PATCH", `/api/consent-requests/${consentId}/approve`, {
       token: msmeToken,
@@ -287,7 +312,7 @@ async function main() {
     );
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
     assert(getActions(audit.data).includes("CONSENT_APPROVED"), "CONSENT_APPROVED audit missing");
-    pass("J. MSME approves selected fields only and approval is audited/notified");
+    pass("N. MSME approves selected fields only and approval is audited/notified");
 
     const trustView = await request("GET", `/api/trust-view/${consentId}`, { token: buyerToken });
     const sharedKeys = Object.keys(trustView.data.sharedFields);
@@ -305,13 +330,15 @@ async function main() {
       "bankAccount",
       "fieldConfidence",
       "documentConfidence",
-      "limitations"
+      "limitations",
+      "readiness",
+      "readinessEvaluations"
     ]) {
       assert(!sharedKeys.includes(forbidden), `unapproved field leaked: ${forbidden}`);
     }
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
     assert(getActions(audit.data).includes("TRUST_PROFILE_VIEWED"), "TRUST_PROFILE_VIEWED audit missing");
-    pass("K. buyer dynamic trust view returns only approved fields and records VIEWED");
+    pass("O. buyer dynamic trust view returns only approved fields, no readiness data, and records VIEWED");
 
     const otherBuyer = await request("POST", "/api/auth/register", {
       body: {
@@ -337,7 +364,7 @@ async function main() {
       ["FORBIDDEN"],
       "buyer raw document fetch"
     );
-    pass("L. unauthorized trust-view, passport, and raw document access are blocked");
+    pass("P. unauthorized trust-view, passport, and raw document access are blocked");
 
     const revoke = await request("PATCH", `/api/consent-requests/${consentId}/revoke`, { token: msmeToken });
     assert(revoke.data.status === "REVOKED", "consent not revoked");
@@ -348,7 +375,7 @@ async function main() {
     );
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
     assert(getActions(audit.data).includes("CONSENT_REVOKED"), "CONSENT_REVOKED audit missing");
-    pass("M. MSME revokes consent and revocation is audited/notified");
+    pass("Q. MSME revokes consent and revocation is audited/notified");
 
     const revokedView = await expectBlocked(
       "GET",
@@ -358,7 +385,7 @@ async function main() {
       "revoked trust view"
     );
     assert(!revokedView.data.sharedFields, "revoked response leaked sharedFields");
-    pass("N. buyer trust-view after revoke is blocked with CONSENT_REVOKED");
+    pass("R. buyer trust-view after revoke is blocked with CONSENT_REVOKED");
 
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
     const actions = getActions(audit.data);
@@ -368,17 +395,18 @@ async function main() {
       "CONSENT_REQUESTED",
       "CONSENT_APPROVED",
       "TRUST_PROFILE_VIEWED",
-      "CONSENT_REVOKED"
+      "CONSENT_REVOKED",
+      "READINESS_PROFILE_EVALUATED"
     ]) {
       assert(actions.includes(action), `audit lifecycle missing ${action}`);
     }
-    pass("O. audit lifecycle contains all required actions");
+    pass("S. audit lifecycle contains all required actions");
 
     msmeNotifications = await request("GET", "/api/notifications", { token: msmeToken });
     buyerNotifications = await request("GET", "/api/notifications", { token: buyerToken });
     assert(msmeNotifications.data.notifications.length > 0, "MSME notifications missing");
     assert(buyerNotifications.data.notifications.length > 0, "buyer notifications missing");
-    pass("P. notification lifecycle has expected MSME and buyer messages");
+    pass("T. notification lifecycle has expected MSME and buyer messages");
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   } finally {

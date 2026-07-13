@@ -92,6 +92,51 @@ Seeded MSME business:
 | Freshness | Whether submitted evidence is current or expired |
 | Trust readiness | Weighted summary: `0.30 completeness + 0.35 evidence strength + 0.25 consistency + 0.10 freshness` |
 
+## Readiness Profile Engine
+
+Trust OS answers: "What do we know about this MSME?"
+
+The Readiness Profile Engine answers: "Ready for what?"
+
+Readiness profiles are version-controlled TypeScript policy configurations. Each profile defines required claims, required evidence, optional evidence, minimum evidence status, confidence thresholds, blocking contradictions, metric thresholds, scoring policy, readiness thresholds, and disclaimers.
+
+The current profiles are demo preparation profiles:
+
+| Profile ID | Purpose |
+|---|---|
+| `vendor-onboarding` | Typical B2B vendor onboarding preparation |
+| `loan-application-preparation` | Document preparation for approaching a lender |
+| `government-procurement` | Generic government-procurement onboarding preparation |
+| `government-scheme-application` | Generic MSME scheme-application preparation |
+
+Readiness results are deterministic and explain every requirement. Blockers override the readiness label, so a high score can still return `BLOCKED` when a configured contradiction or rejected/expired mandatory evidence exists.
+
+Readiness levels are:
+
+- `NOT_READY`
+- `EARLY_STAGE`
+- `PARTIALLY_READY`
+- `MOSTLY_READY`
+- `READY_FOR_REVIEW`
+- `BLOCKED`
+
+The engine never claims loan approval, creditworthiness, government approval, scheme eligibility, vendor acceptance, tender qualification, or external verification. External institutions may define different requirements.
+
+Readiness summaries are persisted for audit history and demo comparison, but they are private to the MSME. Buyers and banks do not see readiness evaluations through Trust View unless a future consent field explicitly shares a safe summary.
+
+Example API calls:
+
+```bash
+curl http://localhost:4000/api/readiness-profiles
+
+curl -X POST \
+  http://localhost:4000/api/readiness-profiles/vendor-onboarding/evaluate \
+  -H "Authorization: Bearer <msme-token>"
+
+curl http://localhost:4000/api/readiness-profiles/vendor-onboarding/latest \
+  -H "Authorization: Bearer <msme-token>"
+```
+
 ## Scripts
 
 | Script | Purpose |
@@ -131,13 +176,18 @@ Smoke-tested flow:
 5. MSME runs internal cross-checking.
 6. Trust metrics, field confidence, document confidence, gaps, and limitations are returned.
 7. MSME generates a Business Trust Profile.
-8. Buyer registers and requests selected fields by GSTIN.
-9. MSME sees incoming request and approves fewer fields than requested.
-10. Buyer opens Dynamic Trust View and receives only approved profile fields.
-11. Unauthorized users are blocked from the Trust View and owner profile.
-12. MSME revokes consent.
-13. Buyer receives `CONSENT_REVOKED`.
-14. Audit logs and notifications contain the lifecycle.
+8. Available readiness profiles are listed.
+9. Vendor Onboarding Readiness and Loan Application Preparation are evaluated.
+10. A missing bank-evidence requirement is identified.
+11. MSME adds bank evidence and the relevant readiness result improves.
+12. Buyer registers and requests selected fields by GSTIN.
+13. MSME sees incoming request and approves fewer fields than requested.
+14. Buyer opens Dynamic Trust View and receives only approved profile fields.
+15. Buyer does not receive unapproved readiness data.
+16. Unauthorized users are blocked from the Trust View and owner profile.
+17. MSME revokes consent.
+18. Buyer receives `CONSENT_REVOKED`.
+19. Audit logs and notifications contain the lifecycle.
 
 ## Running With Docker
 
@@ -184,6 +234,11 @@ All protected endpoints require `Authorization: Bearer <token>`.
 | `PATCH` | `/api/consent-requests/:id/reject` | MSME owner |
 | `PATCH` | `/api/consent-requests/:id/revoke` | MSME owner |
 | `GET` | `/api/trust-view/:consentRequestId` | Original requester |
+| `GET` | `/api/readiness-profiles` | Public |
+| `GET` | `/api/readiness-profiles/:profileId` | Public |
+| `POST` | `/api/readiness-profiles/:profileId/evaluate` | MSME |
+| `GET` | `/api/readiness-profiles/:profileId/latest` | MSME |
+| `GET` | `/api/readiness-profiles/evaluations` | MSME |
 | `GET` | `/api/audit-logs` | MSME owner |
 | `GET` | `/api/notifications` | Any authenticated |
 | `PATCH` | `/api/notifications/:id/read` | Notification owner |
