@@ -506,7 +506,7 @@ export const openApiSpec = {
       get: {
         tags: ["Reports"],
         summary: "List structured JSON report types",
-        description: "Reports are private, JSON-first snapshots. This phase does not provide HTML or PDF rendering and does not claim approval, eligibility, creditworthiness, or external verification.",
+        description: "Reports are private immutable snapshots. HTML and PDF endpoints render the stored JSON snapshot only; they do not recalculate trust, readiness, evidence confidence, gaps, timelines, or summaries.",
         security: [{ bearerAuth: [] }],
         responses: {
           "200": {
@@ -588,6 +588,73 @@ export const openApiSpec = {
         responses: {
           "200": { description: "Report metadata and stored ReportDocument" },
           "404": { description: "Report not found or not owned by the caller", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/reports/{reportId}/preview": {
+      get: {
+        tags: ["Reports"],
+        summary: "Preview a stored report snapshot as safe HTML",
+        description:
+          "Owner MSME only. Returns self-contained, escaped, print-ready HTML generated from stored snapshotJson. Revoked reports render with a revoked banner. No public sharing and no recalculation.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "reportId", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": {
+            description: "Safe HTML preview",
+            content: {
+              "text/html": {
+                schema: { type: "string" },
+                example: "<!doctype html><html><body><main>PRAMAAN report preview</main></body></html>"
+              }
+            }
+          },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { description: "Report not found or not owned by the caller", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
+          "413": { description: "Stored snapshot too large for synchronous rendering", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/reports/{reportId}/html": {
+      get: {
+        tags: ["Reports"],
+        summary: "Download a stored report snapshot as HTML",
+        description:
+          "Owner MSME only. Returns HTML as an attachment with private no-store caching. The output is a presentation of stored snapshotJson only.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "reportId", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": {
+            description: "HTML attachment",
+            headers: {
+              "Content-Disposition": { schema: { type: "string" }, description: "attachment filename with sanitized report name" }
+            },
+            content: { "text/html": { schema: { type: "string" } } }
+          },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { description: "Report not found or not owned by the caller", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/reports/{reportId}/pdf": {
+      get: {
+        tags: ["Reports"],
+        summary: "Download a stored report snapshot as PDF",
+        description:
+          "Owner MSME only. Renders the stored snapshotJson to print-friendly HTML and converts it to PDF. PDF generation uses resource limits and may return renderer errors without changing report data.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "reportId", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": {
+            description: "PDF attachment",
+            headers: {
+              "Content-Disposition": { schema: { type: "string" }, description: "attachment filename with sanitized report name" }
+            },
+            content: { "application/pdf": { schema: { type: "string", format: "binary" } } }
+          },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { description: "Report not found or not owned by the caller", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
+          "503": { description: "PDF renderer unavailable, timed out, or resource constrained", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
         }
       }
     },

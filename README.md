@@ -31,6 +31,7 @@ Important truth rule: PRAMAAN does not mark submitted data as externally verifie
 - Swagger UI docs
 - pino structured request logging
 - helmet, CORS, and API rate limiting
+- Playwright Chromium for private HTML-to-PDF report rendering
 
 ## Setup
 
@@ -40,6 +41,7 @@ copy .env.example .env
 npm run db:init
 npm run db:seed
 npm run prisma:generate
+npm run browser:install
 npm run dev
 ```
 
@@ -151,7 +153,9 @@ Readiness Engine answers: "Ready for what?"
 
 Report Composer answers: "How do we present and preserve the result?"
 
-The Report Composer creates private, JSON-first, immutable report snapshots. It does not render HTML or PDF yet. Generated reports preserve their `reportVersion`, Trust Profile provenance, readiness evaluation provenance, limitations, timeline, gaps, contradictions, blockers, and action plan at the moment of generation.
+The Report Composer creates private, immutable report snapshots. Generated reports preserve their `reportVersion`, Trust Profile provenance, readiness evaluation provenance, limitations, timeline, gaps, contradictions, blockers, and action plan at the moment of generation.
+
+The HTML and PDF rendering layer presents stored `snapshotJson` only. It does not recalculate Trust OS metrics, readiness scores, evidence confidence, contradictions, gaps, timelines, or executive summaries during `GET` requests.
 
 Report types:
 
@@ -166,6 +170,32 @@ Report types:
 Reports are private by default. MSMEs can list, retrieve, and revoke only their own reports. Buyers and banks cannot access report APIs, and report data is not exposed through Trust View. Revocation is non-destructive: `revokedAt` is set, the snapshot is retained for owner audit history, and `REPORT_REVOKED` is recorded.
 
 Reports are not government certificates, bank-approved documents, eligibility decisions, credit assessments, or external verification.
+
+### HTML and PDF Rendering
+
+Phase 3B adds private report presentation formats:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/reports/:reportId/preview` | Owner-only safe HTML preview |
+| `GET /api/reports/:reportId/html` | Owner-only HTML attachment |
+| `GET /api/reports/:reportId/pdf` | Owner-only PDF attachment |
+
+Rendering behavior:
+
+- HTML escapes all snapshot values and never renders raw stored HTML.
+- PDF is generated on demand from the same safe HTML using Playwright Chromium.
+- PDF bytes are not persisted in SQLite.
+- Rendering is private by default; no public share links, signed URLs, email delivery, or QR codes are included.
+- Revoked reports remain owner-visible and show a `REVOKED` banner/watermark.
+- HTML/PDF include limitations, provenance, generated timestamp, report version, and the "not an approval or certificate" disclaimer.
+- Local file paths, storage keys, raw document contents, and raw attachment downloads are not included.
+
+Install Chromium for local PDF rendering:
+
+```bash
+npm run browser:install
+```
 
 Example API calls:
 
@@ -184,6 +214,15 @@ curl http://localhost:4000/api/reports \
 curl http://localhost:4000/api/reports/<report-id> \
   -H "Authorization: Bearer <msme-token>"
 
+curl http://localhost:4000/api/reports/<report-id>/preview \
+  -H "Authorization: Bearer <msme-token>"
+
+curl -OJ http://localhost:4000/api/reports/<report-id>/html \
+  -H "Authorization: Bearer <msme-token>"
+
+curl -OJ http://localhost:4000/api/reports/<report-id>/pdf \
+  -H "Authorization: Bearer <msme-token>"
+
 curl -X POST http://localhost:4000/api/reports/<report-id>/revoke \
   -H "Authorization: Bearer <msme-token>"
 ```
@@ -197,6 +236,8 @@ curl -X POST http://localhost:4000/api/reports/<report-id>/revoke \
 | `npm start` | Run compiled server |
 | `npm test` | Run deterministic Trust Engine tests |
 | `npm run smoke` | Run the real HTTP end-to-end smoke test |
+| `npm run browser:install` | Install Playwright Chromium for PDF rendering |
+| `npm run test:reports` | Run report composer and report rendering tests |
 | `npm run prisma:generate` | Generate Prisma Client |
 | `npm run db:migrate` | Prepare the SQLite file and run `prisma migrate deploy` |
 | `npm run db:reconcile` | Reconcile known legacy SQLite databases with Prisma migration tracking |
@@ -220,6 +261,7 @@ copy .env.example .env
 npm run db:init
 npm run db:seed
 npm run prisma:generate
+npm run browser:install
 npm run dev
 ```
 
@@ -252,6 +294,7 @@ Run the full backend Trust OS sequence:
 
 ```bash
 npm install
+npm run browser:install
 npm run prisma:generate
 npm run db:init
 npm run db:seed
@@ -306,6 +349,8 @@ The container uses SQLite-first local persistence and does not require Postgres.
 
 The Docker command uses the safe local initializer before starting the server. For multi-replica or production-style deployments, run migrations once as a dedicated step with `npm run db:migrate` before starting application processes.
 
+The image installs Playwright Chromium and its Linux dependencies for PDF rendering. This increases image size, but keeps HTML-to-PDF rendering self-contained and avoids external network calls at runtime.
+
 To seed demo data inside the running container:
 
 ```bash
@@ -347,6 +392,9 @@ All protected endpoints require `Authorization: Bearer <token>`.
 | `POST` | `/api/reports/generate` | MSME |
 | `GET` | `/api/reports` | MSME |
 | `GET` | `/api/reports/:reportId` | MSME owner |
+| `GET` | `/api/reports/:reportId/preview` | MSME owner |
+| `GET` | `/api/reports/:reportId/html` | MSME owner |
+| `GET` | `/api/reports/:reportId/pdf` | MSME owner |
 | `POST` | `/api/reports/:reportId/revoke` | MSME owner |
 | `GET` | `/api/audit-logs` | MSME owner |
 | `GET` | `/api/notifications` | Any authenticated |

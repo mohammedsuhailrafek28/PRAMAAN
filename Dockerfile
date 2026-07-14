@@ -24,6 +24,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
 
+RUN npx playwright install --with-deps chromium
 RUN mkdir -p /app/data /app/uploads
 
 EXPOSE 4000

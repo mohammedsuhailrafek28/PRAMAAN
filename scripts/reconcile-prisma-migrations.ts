@@ -75,6 +75,13 @@ const migrations = [
       ]
     },
     indexes: ["GeneratedReport_businessId_generatedAt_idx", "GeneratedReport_reportType_idx", "GeneratedReport_readinessEvaluationId_idx"]
+  },
+  {
+    name: "202607140002_report_rendering_audit_actions",
+    file: path.join(root, "prisma", "migrations", "202607140002_report_rendering_audit_actions", "migration.sql"),
+    tables: [],
+    columns: {},
+    indexes: []
   }
 ] as const;
 

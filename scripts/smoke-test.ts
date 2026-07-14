@@ -79,6 +79,22 @@ async function request(
   return { status: response.status, data };
 }
 
+async function rawRequest(
+  method: string,
+  url: string,
+  options: { token?: string; expected?: number[] } = {}
+) {
+  const headers: HeadersInit = {};
+  if (options.token) headers.Authorization = `Bearer ${options.token}`;
+  const response = await fetch(`${baseUrl}${url}`, { method, headers });
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const expected = options.expected ?? [200];
+  if (!expected.includes(response.status)) {
+    throw new Error(`${method} ${url} returned ${response.status}: ${buffer.toString("utf8")}`);
+  }
+  return { status: response.status, headers: response.headers, buffer, text: buffer.toString("utf8") };
+}
+
 async function expectBlocked(
   method: string,
   url: string,
@@ -317,12 +333,31 @@ async function main() {
     assert(fetchedVendorReport.data.document.business.businessName === oldBusinessName, "retrieved report snapshot mismatch");
     pass("N. reports list returns metadata and retrieval returns stored snapshot");
 
+    const htmlPreview = await rawRequest("GET", `/api/reports/${vendorReportId}/preview`, { token: msmeToken });
+    assert(htmlPreview.headers.get("content-type")?.includes("text/html"), "HTML preview content type missing");
+    assert(htmlPreview.headers.get("cache-control")?.includes("no-store"), "HTML preview cache header missing");
+    assert(htmlPreview.text.includes(vendorReportId), "HTML preview missing report ID");
+    assert(htmlPreview.text.includes(oldBusinessName), "HTML preview missing business name");
+    assert(htmlPreview.text.includes("Limitations and Disclaimer"), "HTML preview missing limitations");
+    assert(!htmlPreview.text.includes("uploads/") && !htmlPreview.text.includes("uploads\\"), "HTML preview leaked local path");
+    const htmlDownload = await rawRequest("GET", `/api/reports/${vendorReportId}/html`, { token: msmeToken });
+    assert(htmlDownload.headers.get("content-disposition")?.includes(".html"), "HTML download disposition missing");
+    const pdfDownload = await rawRequest("GET", `/api/reports/${vendorReportId}/pdf`, { token: msmeToken });
+    assert(pdfDownload.headers.get("content-type")?.includes("application/pdf"), "PDF content type missing");
+    assert(pdfDownload.buffer.subarray(0, 4).toString("utf8") === "%PDF", "PDF signature missing");
+    pass("N2. report HTML preview, HTML download, and PDF download render stored snapshot");
+
     await request("PATCH", "/api/business/me", {
       token: msmeToken,
       body: { ...businessInput, legalName: "Sharma Textiles Updated" }
     });
     const oldReportAfterUpdate = await request("GET", `/api/reports/${vendorReportId}`, { token: msmeToken });
     assert(oldReportAfterUpdate.data.document.business.businessName === oldBusinessName, "old report mutated after business update");
+    const oldHtmlAfterUpdate = await rawRequest("GET", `/api/reports/${vendorReportId}/preview`, { token: msmeToken });
+    assert(oldHtmlAfterUpdate.text.includes(oldBusinessName), "old HTML did not preserve old business name");
+    assert(!oldHtmlAfterUpdate.text.includes("Sharma Textiles Updated"), "old HTML was recalculated from updated business");
+    const oldPdfAfterUpdate = await rawRequest("GET", `/api/reports/${vendorReportId}/pdf`, { token: msmeToken });
+    assert(oldPdfAfterUpdate.buffer.subarray(0, 4).toString("utf8") === "%PDF", "old PDF after update invalid");
     const newTrustReport = await request("POST", "/api/reports/generate", {
       token: msmeToken,
       body: { reportType: "BUSINESS_TRUST_PROFILE" }
@@ -343,12 +378,39 @@ async function main() {
     assert(buyerToken, "Buyer token missing");
     await expectBlocked("GET", "/api/reports", buyerToken, ["FORBIDDEN"], "buyer report list");
     await expectBlocked("GET", `/api/reports/${vendorReportId}`, buyerToken, ["FORBIDDEN"], "buyer report retrieve");
+    await expectBlocked("GET", `/api/reports/${vendorReportId}/preview`, buyerToken, ["FORBIDDEN"], "buyer report HTML preview");
+    await expectBlocked("GET", `/api/reports/${vendorReportId}/pdf`, buyerToken, ["FORBIDDEN"], "buyer report PDF download");
+    const bankRegistration = await request("POST", "/api/auth/register", {
+      body: {
+        role: "BANK",
+        name: "Karan Mehta",
+        organizationName: "Kisan NBFC",
+        email: "bank-smoke@pramaan.demo",
+        password: "password123"
+      }
+    });
+    await expectBlocked("GET", `/api/reports/${vendorReportId}/html`, bankRegistration.data.token, ["FORBIDDEN"], "bank report HTML download");
+    const otherMsme = await request("POST", "/api/auth/register", {
+      body: {
+        role: "MSME",
+        name: "Other MSME",
+        organizationName: "Other MSME Co",
+        email: "other-msme-smoke@pramaan.demo",
+        password: "password123"
+      }
+    });
+    await expectBlocked("GET", `/api/reports/${vendorReportId}/preview`, otherMsme.data.token, ["NOT_FOUND"], "other MSME report preview");
+    await expectBlocked("GET", "/api/reports/not-a-real-report/preview", msmeToken, ["NOT_FOUND"], "guessed report preview");
     pass("P. buyer auth returns JWT and cannot access report APIs");
 
     const revokeReport = await request("POST", `/api/reports/${trustReportId}/revoke`, { token: msmeToken });
     assert(revokeReport.data.report.revokedAt, "report revoke timestamp missing");
     const revokedReport = await request("GET", `/api/reports/${trustReportId}`, { token: msmeToken });
     assert(revokedReport.data.report.revokedAt, "revoked report not visible to owner");
+    const revokedHtml = await rawRequest("GET", `/api/reports/${trustReportId}/preview`, { token: msmeToken });
+    assert(revokedHtml.text.includes("REVOKED"), "revoked HTML missing revoked state");
+    const revokedPdf = await rawRequest("GET", `/api/reports/${trustReportId}/pdf`, { token: msmeToken });
+    assert(revokedPdf.buffer.subarray(0, 4).toString("utf8") === "%PDF", "revoked PDF signature missing");
     pass("Q. owner revokes report non-destructively and can still see revoked status");
 
     const consentCreate = await request("POST", "/api/consent-requests", {
@@ -477,7 +539,10 @@ async function main() {
       "CONSENT_REVOKED",
       "READINESS_PROFILE_EVALUATED",
       "REPORT_GENERATED",
-      "REPORT_REVOKED"
+      "REPORT_REVOKED",
+      "REPORT_HTML_VIEWED",
+      "REPORT_HTML_DOWNLOADED",
+      "REPORT_PDF_DOWNLOADED"
     ]) {
       assert(actions.includes(action), `audit lifecycle missing ${action}`);
     }
