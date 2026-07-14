@@ -3,8 +3,12 @@ dist
 .git
 .env
 *.db
+*.db.backup-*
 prisma/dev.db
+prisma/.tmp-migration-tests
+prisma/.tmp-smoke
 uploads
+.tmp-smoke-uploads
 test-fixtures
 server*.log
 npm-debug.log

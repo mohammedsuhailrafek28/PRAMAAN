@@ -3,8 +3,12 @@ dist/
 .env
 uploads/
 *.db
+*.db.backup-*
 dev.db
 prisma/dev.db
+prisma/.tmp-migration-tests/
+prisma/.tmp-smoke/
+.tmp-smoke-uploads/
 dev.db-journal
 .DS_Store
 *.log
