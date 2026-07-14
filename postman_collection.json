@@ -1,13 +1,14 @@
 {
   "info": {
-    "name": "Pramaan Backend MVP",
+    "name": "Pramaan Trust OS Backend",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:4000" },
     { "key": "msmeToken", "value": "" },
     { "key": "buyerToken", "value": "" },
-    { "key": "consentId", "value": "" }
+    { "key": "consentId", "value": "" },
+    { "key": "reportId", "value": "" }
   ],
   "item": [
     {
@@ -35,15 +36,15 @@
       }
     },
     {
-      "name": "MSME - Verify Business",
+      "name": "MSME - Internal Cross-Check",
       "request": {
         "method": "POST",
         "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
-        "url": "{{baseUrl}}/api/business/verify"
+        "url": "{{baseUrl}}/api/business/cross-check"
       }
     },
     {
-      "name": "MSME - Generate Passport",
+      "name": "MSME - Generate Business Trust Profile",
       "request": {
         "method": "POST",
         "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
@@ -61,8 +62,88 @@
         "url": "{{baseUrl}}/api/consent-requests",
         "body": {
           "mode": "raw",
-          "raw": "{\"businessGstin\":\"33ABCDE1234F1Z5\",\"requestedFields\":[\"legalBusinessName\",\"gstin\",\"udyamNumber\",\"turnoverBand\",\"bankVerificationStatus\",\"complianceStatus\"]}"
+          "raw": "{\"businessGstin\":\"33ABCDE1234F1Z5\",\"requestedFields\":[\"legalBusinessName\",\"gstin\",\"udyamNumber\",\"summary\",\"limitations\"]}"
         }
+      }
+    },
+    {
+      "name": "Readiness - List Profiles",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/readiness-profiles"
+      }
+    },
+    {
+      "name": "Readiness - Evaluate Vendor Onboarding",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/readiness-profiles/vendor-onboarding/evaluate"
+      }
+    },
+    {
+      "name": "Reports - List Types",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/report-types"
+      }
+    },
+    {
+      "name": "Reports - Generate Business Trust Profile",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{msmeToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/reports/generate",
+        "body": { "mode": "raw", "raw": "{\"reportType\":\"BUSINESS_TRUST_PROFILE\"}" }
+      }
+    },
+    {
+      "name": "Reports - Generate Vendor Readiness",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{msmeToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/reports/generate",
+        "body": { "mode": "raw", "raw": "{\"reportType\":\"VENDOR_ONBOARDING_READINESS\"}" }
+      }
+    },
+    {
+      "name": "Reports - List",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/reports"
+      }
+    },
+    {
+      "name": "Reports - Get",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/reports/{{reportId}}"
+      }
+    },
+    {
+      "name": "Reports - Revoke",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/reports/{{reportId}}/revoke"
+      }
+    },
+    {
+      "name": "Reports - Buyer Forbidden",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{buyerToken}}" }],
+        "url": "{{baseUrl}}/api/reports/{{reportId}}"
       }
     },
     {
@@ -84,7 +165,7 @@
         "url": "{{baseUrl}}/api/consent-requests/{{consentId}}/approve",
         "body": {
           "mode": "raw",
-          "raw": "{\"approvedFields\":[\"legalBusinessName\",\"gstin\",\"udyamNumber\",\"complianceStatus\"],\"durationDays\":7}"
+          "raw": "{\"approvedFields\":[\"legalBusinessName\",\"gstin\",\"udyamNumber\",\"summary\"],\"durationDays\":7}"
         }
       }
     },

@@ -2,15 +2,21 @@ import type { Prisma } from "@prisma/client";
 
 export const allowedPassportFields = [
   "legalBusinessName",
+  "ownerName",
   "gstin",
-  "gstinVerified",
   "udyamNumber",
-  "udyamVerified",
-  "panMasked",
+  "pan",
   "address",
   "turnoverBand",
-  "bankVerificationStatus",
-  "complianceStatus",
+  "bankAccount",
+  "summary",
+  "fieldConfidence",
+  "documentConfidence",
+  "gaps",
+  "contradictions",
+  "limitations",
+  "sourceVerificationPerformed",
+  "lastCalculatedAt",
   "generatedAt",
   "version"
 ] as const;

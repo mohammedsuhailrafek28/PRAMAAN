@@ -16,7 +16,16 @@ export async function patchMine(req: Request, res: Response) {
 
 export async function uploadDocument(req: Request, res: Response) {
   const document = await businessService.uploadDocument(req.user!.id, req.body.docType, req.file);
-  res.status(201).json({ documentId: document.id, verifiedFlag: document.verifiedFlag, document });
+  res.status(201).json({
+    documentId: document.id,
+    evidenceStatus: document.evidenceStatus,
+    confidence: document.confidence,
+    document
+  });
+}
+
+export async function crossCheck(req: Request, res: Response) {
+  res.json(await businessService.crossCheck(req.user!));
 }
 
 export async function verify(req: Request, res: Response) {

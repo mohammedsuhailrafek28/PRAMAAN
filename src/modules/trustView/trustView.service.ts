@@ -39,7 +39,7 @@ export async function getTrustView(userId: string, consentRequestId: string) {
     await createNotification({
       userId,
       relatedConsentId: consent.id,
-      message: `Trust Passport access for ${consent.business.legalName} has expired.`
+      message: `Business Trust Profile access for ${consent.business.legalName} has expired.`
     });
     throw new ApiError(410, "CONSENT_EXPIRED", "Access has expired.");
   }
@@ -48,7 +48,7 @@ export async function getTrustView(userId: string, consentRequestId: string) {
     where: { businessId: consent.businessId },
     orderBy: { version: "desc" }
   });
-  if (!passport) throw new ApiError(404, "NOT_FOUND", "Trust Passport not generated yet.");
+  if (!passport) throw new ApiError(404, "NOT_FOUND", "Business Trust Profile not generated yet.");
 
   const viewedAt = new Date();
   const approvedFields = (consent.approvedFields ?? []) as string[];
@@ -58,7 +58,7 @@ export async function getTrustView(userId: string, consentRequestId: string) {
     businessId: consent.businessId,
     actorId: userId,
     consentRequestId: consent.id,
-    action: AuditAction.VIEWED,
+    action: AuditAction.TRUST_PROFILE_VIEWED,
     metadata: { viewedAt: viewedAt.toISOString(), fields: Object.keys(sharedFields) }
   });
 
