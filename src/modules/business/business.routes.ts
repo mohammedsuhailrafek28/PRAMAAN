@@ -40,6 +40,7 @@ router.post(
   validate({ body: docSchema }),
   asyncHandler(controller.uploadDocument)
 );
+router.post("/cross-check", asyncHandler(controller.crossCheck));
 router.post("/verify", asyncHandler(controller.verify));
 
 export default router;

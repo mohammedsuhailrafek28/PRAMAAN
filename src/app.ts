@@ -17,6 +17,8 @@ import consentRoutes from "./modules/consent/consent.routes.js";
 import trustViewRoutes from "./modules/trustView/trustView.routes.js";
 import auditRoutes from "./modules/audit/audit.routes.js";
 import notificationRoutes from "./modules/notifications/notifications.routes.js";
+import readinessRoutes from "./modules/readinessEngine/readiness.routes.js";
+import reportRoutes from "./modules/reportComposer/report.routes.js";
 
 export const app = express();
 
@@ -124,6 +126,8 @@ app.use("/api/business", businessRoutes);
 app.use("/api/passport", passportRoutes);
 app.use("/api/consent-requests", consentRoutes);
 app.use("/api/trust-view", trustViewRoutes);
+app.use("/api/readiness-profiles", readinessRoutes);
+app.use("/api", reportRoutes);
 app.use("/api/audit-logs", auditRoutes);
 app.use("/api/notifications", notificationRoutes);
 

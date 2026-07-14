@@ -7,6 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "test": "tsx scripts/trust-engine-tests.ts && tsx scripts/readiness-engine-tests.ts && tsx scripts/report-composer-tests.ts",
     "smoke": "tsx scripts/smoke-test.ts",
     "db:init": "tsx prisma/init-sqlite.ts",
     "prisma:migrate": "prisma migrate dev",

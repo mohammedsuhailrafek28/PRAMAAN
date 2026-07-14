@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import "dotenv/config";
 import {
   DocumentType,
+  EvidenceStatus,
   UserRole,
   VerificationStatus,
   type PrismaClient
@@ -56,6 +57,8 @@ async function main() {
 
     await prisma.notification.deleteMany({ where: { relatedConsentId: { in: consentIds } } });
     await prisma.auditLog.deleteMany({ where: { businessId: existingGstinOwner.id } });
+    await prisma.generatedReport.deleteMany({ where: { businessId: existingGstinOwner.id } });
+    await prisma.readinessEvaluation.deleteMany({ where: { businessId: existingGstinOwner.id } });
     await prisma.consentRequest.deleteMany({ where: { businessId: existingGstinOwner.id } });
     await prisma.passport.deleteMany({ where: { businessId: existingGstinOwner.id } });
     await prisma.document.deleteMany({ where: { businessId: existingGstinOwner.id } });
@@ -71,7 +74,10 @@ async function main() {
       pan: "ABCDE1234F",
       address: "12 Textile Market Road, Coimbatore, Tamil Nadu",
       turnoverBand: "INR 1Cr-INR 5Cr",
-      verificationStatus: VerificationStatus.UNVERIFIED
+      verificationStatus: VerificationStatus.UNVERIFIED,
+      trustStatus: EvidenceStatus.SELF_DECLARED,
+      trustSummary: undefined,
+      lastCrossCheckedAt: undefined
     },
     create: {
       userId: msme.id,
@@ -81,7 +87,8 @@ async function main() {
       pan: "ABCDE1234F",
       address: "12 Textile Market Road, Coimbatore, Tamil Nadu",
       turnoverBand: "INR 1Cr-INR 5Cr",
-      verificationStatus: VerificationStatus.UNVERIFIED
+      verificationStatus: VerificationStatus.UNVERIFIED,
+      trustStatus: EvidenceStatus.SELF_DECLARED
     }
   });
 
@@ -98,7 +105,10 @@ async function main() {
           docType,
           filePath: `uploads/seed-${docType.toLowerCase()}.pdf`,
           originalName: `seed-${docType.toLowerCase()}.pdf`,
-          mimeType: "application/pdf"
+          mimeType: "application/pdf",
+          evidenceStatus: EvidenceStatus.DOCUMENT_SUBMITTED,
+          confidence: 45,
+          confidenceReason: "Seeded sample evidence row. Contents are not parsed or source verified."
         }
       });
     }
