@@ -261,6 +261,50 @@ async function main() {
     assert(!improvedVendorReadiness.data.requirements.some((item: Json) => item.requirementId === "vendor_bank_evidence" && item.status === "MISSING"), "bank evidence remained missing after upload");
     pass("J. adding missing bank evidence improves the relevant readiness result");
 
+    const reportTypes = await request("GET", "/api/report-types", { token: msmeToken });
+    assert(reportTypes.data.reportTypes.length === 5, "report types missing");
+    pass("K. report types are listed");
+
+    const trustReport = await request("POST", "/api/reports/generate", {
+      token: msmeToken,
+      body: { reportType: "BUSINESS_TRUST_PROFILE" }
+    });
+    const trustReportId = trustReport.data.report.reportId;
+    assert(trustReportId, "trust report ID missing");
+    assert(trustReport.data.document.reportType === "BUSINESS_TRUST_PROFILE", "trust report type mismatch");
+    assert(!JSON.stringify(trustReport.data.document).includes("uploads\\"), "trust report leaked local path");
+    pass("L. Business Trust Profile Report is generated as safe JSON");
+
+    const vendorReport = await request("POST", "/api/reports/generate", {
+      token: msmeToken,
+      body: { reportType: "VENDOR_ONBOARDING_READINESS" }
+    });
+    const vendorReportId = vendorReport.data.report.reportId;
+    const oldBusinessName = vendorReport.data.document.business.businessName;
+    assert(vendorReport.data.document.requirements.length > 0, "vendor report requirements missing");
+    assert(vendorReport.data.document.provenance.readinessEvaluationId, "vendor report readiness provenance missing");
+    pass("M. Vendor Onboarding Readiness Report is generated with readiness provenance");
+
+    const reportList = await request("GET", "/api/reports", { token: msmeToken });
+    assert(reportList.data.reports.some((item: Json) => item.reportId === vendorReportId), "report metadata missing");
+    assert(!reportList.data.reports.some((item: Json) => item.snapshotJson), "report list leaked full snapshots");
+    const fetchedVendorReport = await request("GET", `/api/reports/${vendorReportId}`, { token: msmeToken });
+    assert(fetchedVendorReport.data.document.business.businessName === oldBusinessName, "retrieved report snapshot mismatch");
+    pass("N. reports list returns metadata and retrieval returns stored snapshot");
+
+    await request("PATCH", "/api/business/me", {
+      token: msmeToken,
+      body: { ...businessInput, legalName: "Sharma Textiles Updated" }
+    });
+    const oldReportAfterUpdate = await request("GET", `/api/reports/${vendorReportId}`, { token: msmeToken });
+    assert(oldReportAfterUpdate.data.document.business.businessName === oldBusinessName, "old report mutated after business update");
+    const newTrustReport = await request("POST", "/api/reports/generate", {
+      token: msmeToken,
+      body: { reportType: "BUSINESS_TRUST_PROFILE" }
+    });
+    assert(newTrustReport.data.document.business.businessName === "Sharma Textiles Updated", "new report did not reflect updated business");
+    pass("O. old report remains immutable and new report reflects new state");
+
     const buyerRegistration = await request("POST", "/api/auth/register", {
       body: {
         role: "BUYER",
@@ -272,7 +316,15 @@ async function main() {
     });
     const buyerToken = buyerRegistration.data.token;
     assert(buyerToken, "Buyer token missing");
-    pass("K. buyer auth returns JWT");
+    await expectBlocked("GET", "/api/reports", buyerToken, ["FORBIDDEN"], "buyer report list");
+    await expectBlocked("GET", `/api/reports/${vendorReportId}`, buyerToken, ["FORBIDDEN"], "buyer report retrieve");
+    pass("P. buyer auth returns JWT and cannot access report APIs");
+
+    const revokeReport = await request("POST", `/api/reports/${trustReportId}/revoke`, { token: msmeToken });
+    assert(revokeReport.data.report.revokedAt, "report revoke timestamp missing");
+    const revokedReport = await request("GET", `/api/reports/${trustReportId}`, { token: msmeToken });
+    assert(revokedReport.data.report.revokedAt, "revoked report not visible to owner");
+    pass("Q. owner revokes report non-destructively and can still see revoked status");
 
     const consentCreate = await request("POST", "/api/consent-requests", {
       token: buyerToken,
@@ -290,11 +342,11 @@ async function main() {
     );
     let audit = await request("GET", "/api/audit-logs", { token: msmeToken });
     assert(getActions(audit.data).includes("CONSENT_REQUESTED"), "CONSENT_REQUESTED audit missing");
-    pass("L. buyer creates pending consent request, MSME notification and CONSENT_REQUESTED audit exist");
+    pass("R. buyer creates pending consent request, MSME notification and CONSENT_REQUESTED audit exist");
 
     const incoming = await request("GET", "/api/consent-requests?scope=incoming", { token: msmeToken });
     assert(incoming.data.requests.some((item: Json) => item.id === consentId), "incoming request missing");
-    pass("M. MSME sees incoming buyer request");
+    pass("S. MSME sees incoming buyer request");
 
     const approve = await request("PATCH", `/api/consent-requests/${consentId}/approve`, {
       token: msmeToken,
@@ -312,7 +364,7 @@ async function main() {
     );
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
     assert(getActions(audit.data).includes("CONSENT_APPROVED"), "CONSENT_APPROVED audit missing");
-    pass("N. MSME approves selected fields only and approval is audited/notified");
+    pass("T. MSME approves selected fields only and approval is audited/notified");
 
     const trustView = await request("GET", `/api/trust-view/${consentId}`, { token: buyerToken });
     const sharedKeys = Object.keys(trustView.data.sharedFields);
@@ -332,13 +384,15 @@ async function main() {
       "documentConfidence",
       "limitations",
       "readiness",
-      "readinessEvaluations"
+      "readinessEvaluations",
+      "reports",
+      "reportId"
     ]) {
       assert(!sharedKeys.includes(forbidden), `unapproved field leaked: ${forbidden}`);
     }
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
     assert(getActions(audit.data).includes("TRUST_PROFILE_VIEWED"), "TRUST_PROFILE_VIEWED audit missing");
-    pass("O. buyer dynamic trust view returns only approved fields, no readiness data, and records VIEWED");
+    pass("U. buyer dynamic trust view returns only approved fields, no report data, and records VIEWED");
 
     const otherBuyer = await request("POST", "/api/auth/register", {
       body: {
@@ -364,7 +418,7 @@ async function main() {
       ["FORBIDDEN"],
       "buyer raw document fetch"
     );
-    pass("P. unauthorized trust-view, passport, and raw document access are blocked");
+    pass("V. unauthorized trust-view, passport, and raw document access are blocked");
 
     const revoke = await request("PATCH", `/api/consent-requests/${consentId}/revoke`, { token: msmeToken });
     assert(revoke.data.status === "REVOKED", "consent not revoked");
@@ -375,7 +429,7 @@ async function main() {
     );
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
     assert(getActions(audit.data).includes("CONSENT_REVOKED"), "CONSENT_REVOKED audit missing");
-    pass("Q. MSME revokes consent and revocation is audited/notified");
+    pass("W. MSME revokes consent and revocation is audited/notified");
 
     const revokedView = await expectBlocked(
       "GET",
@@ -385,7 +439,7 @@ async function main() {
       "revoked trust view"
     );
     assert(!revokedView.data.sharedFields, "revoked response leaked sharedFields");
-    pass("R. buyer trust-view after revoke is blocked with CONSENT_REVOKED");
+    pass("X. buyer trust-view after revoke is blocked with CONSENT_REVOKED");
 
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
     const actions = getActions(audit.data);
@@ -396,17 +450,19 @@ async function main() {
       "CONSENT_APPROVED",
       "TRUST_PROFILE_VIEWED",
       "CONSENT_REVOKED",
-      "READINESS_PROFILE_EVALUATED"
+      "READINESS_PROFILE_EVALUATED",
+      "REPORT_GENERATED",
+      "REPORT_REVOKED"
     ]) {
       assert(actions.includes(action), `audit lifecycle missing ${action}`);
     }
-    pass("S. audit lifecycle contains all required actions");
+    pass("Y. audit lifecycle contains all required actions");
 
     msmeNotifications = await request("GET", "/api/notifications", { token: msmeToken });
     buyerNotifications = await request("GET", "/api/notifications", { token: buyerToken });
     assert(msmeNotifications.data.notifications.length > 0, "MSME notifications missing");
     assert(buyerNotifications.data.notifications.length > 0, "buyer notifications missing");
-    pass("T. notification lifecycle has expected MSME and buyer messages");
+    pass("Z. notification lifecycle has expected MSME and buyer messages");
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   } finally {

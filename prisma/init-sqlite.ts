@@ -127,6 +127,26 @@ CREATE TABLE IF NOT EXISTS "ReadinessEvaluation" (
   "evaluatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "ReadinessEvaluation_businessId_fkey" FOREIGN KEY ("businessId") REFERENCES "Business" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS "GeneratedReport" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "businessId" TEXT NOT NULL,
+  "reportType" TEXT NOT NULL,
+  "reportVersion" TEXT NOT NULL,
+  "trustProfileId" TEXT,
+  "readinessEvaluationId" TEXT,
+  "snapshotJson" JSONB NOT NULL,
+  "generatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "expiresAt" DATETIME,
+  "revokedAt" DATETIME,
+  "createdByUserId" TEXT NOT NULL,
+  CONSTRAINT "GeneratedReport_businessId_fkey" FOREIGN KEY ("businessId") REFERENCES "Business" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT "GeneratedReport_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS "GeneratedReport_businessId_generatedAt_idx" ON "GeneratedReport"("businessId", "generatedAt");
+CREATE INDEX IF NOT EXISTS "GeneratedReport_reportType_idx" ON "GeneratedReport"("reportType");
+CREATE INDEX IF NOT EXISTS "GeneratedReport_readinessEvaluationId_idx" ON "GeneratedReport"("readinessEvaluationId");
 `);
 
 const existingColumns = (tableName: string) =>

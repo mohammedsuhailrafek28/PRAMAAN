@@ -57,6 +57,8 @@ async function main() {
 
     await prisma.notification.deleteMany({ where: { relatedConsentId: { in: consentIds } } });
     await prisma.auditLog.deleteMany({ where: { businessId: existingGstinOwner.id } });
+    await prisma.generatedReport.deleteMany({ where: { businessId: existingGstinOwner.id } });
+    await prisma.readinessEvaluation.deleteMany({ where: { businessId: existingGstinOwner.id } });
     await prisma.consentRequest.deleteMany({ where: { businessId: existingGstinOwner.id } });
     await prisma.passport.deleteMany({ where: { businessId: existingGstinOwner.id } });
     await prisma.document.deleteMany({ where: { businessId: existingGstinOwner.id } });

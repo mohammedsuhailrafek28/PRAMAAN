@@ -137,6 +137,51 @@ curl http://localhost:4000/api/readiness-profiles/vendor-onboarding/latest \
   -H "Authorization: Bearer <msme-token>"
 ```
 
+## Report Composer
+
+Trust OS answers: "What do we know?"
+
+Readiness Engine answers: "Ready for what?"
+
+Report Composer answers: "How do we present and preserve the result?"
+
+The Report Composer creates private, JSON-first, immutable report snapshots. It does not render HTML or PDF yet. Generated reports preserve their `reportVersion`, Trust Profile provenance, readiness evaluation provenance, limitations, timeline, gaps, contradictions, blockers, and action plan at the moment of generation.
+
+Report types:
+
+| Report type | Purpose |
+|---|---|
+| `BUSINESS_TRUST_PROFILE` | Evidence-backed Business Trust Profile report |
+| `VENDOR_ONBOARDING_READINESS` | Vendor onboarding preparation report |
+| `LOAN_APPLICATION_PREPARATION` | Loan application document-preparation report |
+| `GOVERNMENT_PROCUREMENT_READINESS` | Generic government procurement preparation report |
+| `GOVERNMENT_SCHEME_APPLICATION_READINESS` | Generic scheme application preparation report |
+
+Reports are private by default. MSMEs can list, retrieve, and revoke only their own reports. Buyers and banks cannot access report APIs, and report data is not exposed through Trust View. Revocation is non-destructive: `revokedAt` is set, the snapshot is retained for owner audit history, and `REPORT_REVOKED` is recorded.
+
+Reports are not government certificates, bank-approved documents, eligibility decisions, credit assessments, or external verification.
+
+Example API calls:
+
+```bash
+curl http://localhost:4000/api/report-types \
+  -H "Authorization: Bearer <msme-token>"
+
+curl -X POST http://localhost:4000/api/reports/generate \
+  -H "Authorization: Bearer <msme-token>" \
+  -H "Content-Type: application/json" \
+  -d "{\"reportType\":\"VENDOR_ONBOARDING_READINESS\"}"
+
+curl http://localhost:4000/api/reports \
+  -H "Authorization: Bearer <msme-token>"
+
+curl http://localhost:4000/api/reports/<report-id> \
+  -H "Authorization: Bearer <msme-token>"
+
+curl -X POST http://localhost:4000/api/reports/<report-id>/revoke \
+  -H "Authorization: Bearer <msme-token>"
+```
+
 ## Scripts
 
 | Script | Purpose |
@@ -180,14 +225,21 @@ Smoke-tested flow:
 9. Vendor Onboarding Readiness and Loan Application Preparation are evaluated.
 10. A missing bank-evidence requirement is identified.
 11. MSME adds bank evidence and the relevant readiness result improves.
-12. Buyer registers and requests selected fields by GSTIN.
-13. MSME sees incoming request and approves fewer fields than requested.
-14. Buyer opens Dynamic Trust View and receives only approved profile fields.
-15. Buyer does not receive unapproved readiness data.
-16. Unauthorized users are blocked from the Trust View and owner profile.
-17. MSME revokes consent.
-18. Buyer receives `CONSENT_REVOKED`.
-19. Audit logs and notifications contain the lifecycle.
+12. Report types are listed.
+13. Business Trust Profile and Vendor Readiness reports are generated.
+14. Report listing returns metadata only.
+15. Report retrieval returns the stored immutable snapshot.
+16. Business data changes and old reports remain unchanged.
+17. Buyer registers and cannot access report APIs.
+18. MSME revokes a report non-destructively.
+19. Buyer requests selected fields by GSTIN.
+20. MSME sees incoming request and approves fewer fields than requested.
+21. Buyer opens Dynamic Trust View and receives only approved profile fields.
+22. Buyer does not receive unapproved report data.
+23. Unauthorized users are blocked from the Trust View and owner profile.
+24. MSME revokes consent.
+25. Buyer receives `CONSENT_REVOKED`.
+26. Audit logs and notifications contain the lifecycle.
 
 ## Running With Docker
 
@@ -239,6 +291,11 @@ All protected endpoints require `Authorization: Bearer <token>`.
 | `POST` | `/api/readiness-profiles/:profileId/evaluate` | MSME |
 | `GET` | `/api/readiness-profiles/:profileId/latest` | MSME |
 | `GET` | `/api/readiness-profiles/evaluations` | MSME |
+| `GET` | `/api/report-types` | Authenticated |
+| `POST` | `/api/reports/generate` | MSME |
+| `GET` | `/api/reports` | MSME |
+| `GET` | `/api/reports/:reportId` | MSME owner |
+| `POST` | `/api/reports/:reportId/revoke` | MSME owner |
 | `GET` | `/api/audit-logs` | MSME owner |
 | `GET` | `/api/notifications` | Any authenticated |
 | `PATCH` | `/api/notifications/:id/read` | Notification owner |

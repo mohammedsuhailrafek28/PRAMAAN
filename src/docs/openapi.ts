@@ -28,6 +28,16 @@ export const openApiSpec = {
         type: "string",
         enum: ["NOT_READY", "EARLY_STAGE", "PARTIALLY_READY", "MOSTLY_READY", "READY_FOR_REVIEW", "BLOCKED"]
       },
+      ReportType: {
+        type: "string",
+        enum: [
+          "BUSINESS_TRUST_PROFILE",
+          "VENDOR_ONBOARDING_READINESS",
+          "LOAN_APPLICATION_PREPARATION",
+          "GOVERNMENT_PROCUREMENT_READINESS",
+          "GOVERNMENT_SCHEME_APPLICATION_READINESS"
+        ]
+      },
       ErrorResponse: {
         type: "object",
         properties: {
@@ -490,6 +500,105 @@ export const openApiSpec = {
         summary: "Fetch the authenticated MSME's readiness evaluation history",
         security: [{ bearerAuth: [] }],
         responses: { "200": { description: "Evaluation history" } }
+      }
+    },
+    "/api/report-types": {
+      get: {
+        tags: ["Reports"],
+        summary: "List structured JSON report types",
+        description: "Reports are private, JSON-first snapshots. This phase does not provide HTML or PDF rendering and does not claim approval, eligibility, creditworthiness, or external verification.",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": {
+            description: "Available report types",
+            content: {
+              "application/json": {
+                example: {
+                  reportTypes: [
+                    {
+                      reportType: "BUSINESS_TRUST_PROFILE",
+                      displayName: "Business Trust Profile Report",
+                      reportVersion: "1.0",
+                      readinessProfileId: null
+                    },
+                    {
+                      reportType: "VENDOR_ONBOARDING_READINESS",
+                      displayName: "Vendor Onboarding Readiness Report",
+                      reportVersion: "1.0",
+                      readinessProfileId: "vendor-onboarding"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/generate": {
+      post: {
+        tags: ["Reports"],
+        summary: "Generate an immutable structured report snapshot",
+        description: "MSME-only. Generates JSON snapshots only. Business Trust Profile reports do not require readiness evaluation; readiness reports use canonical readiness evaluations.",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["reportType"],
+                properties: { reportType: { $ref: "#/components/schemas/ReportType" } }
+              },
+              examples: {
+                trustProfile: { value: { reportType: "BUSINESS_TRUST_PROFILE" } },
+                vendorReadiness: { value: { reportType: "VENDOR_ONBOARDING_READINESS" } },
+                blockedLoan: { value: { reportType: "LOAN_APPLICATION_PREPARATION" } }
+              }
+            }
+          }
+        },
+        responses: {
+          "201": { description: "Report metadata and structured ReportDocument snapshot" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "400": { $ref: "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/api/reports": {
+      get: {
+        tags: ["Reports"],
+        summary: "List the authenticated MSME's report metadata",
+        description: "Returns metadata only, not full report snapshots. Buyers and banks cannot access this endpoint.",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: "reportType", in: "query", required: false, schema: { $ref: "#/components/schemas/ReportType" } },
+          { name: "revoked", in: "query", required: false, schema: { type: "string", enum: ["true", "false"] } }
+        ],
+        responses: { "200": { description: "Report metadata list" } }
+      }
+    },
+    "/api/reports/{reportId}": {
+      get: {
+        tags: ["Reports"],
+        summary: "Retrieve a stored immutable report snapshot",
+        description: "GET returns stored snapshotJson; it never regenerates the report. Revoked reports remain visible to the owner with revoked status.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "reportId", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "Report metadata and stored ReportDocument" },
+          "404": { description: "Report not found or not owned by the caller", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/reports/{reportId}/revoke": {
+      post: {
+        tags: ["Reports"],
+        summary: "Non-destructively revoke a report",
+        description: "Sets revokedAt, retains the immutable snapshot for owner audit history, and writes REPORT_REVOKED.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "reportId", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "Revoked report metadata and snapshot" } }
       }
     },
     "/api/audit-logs": {

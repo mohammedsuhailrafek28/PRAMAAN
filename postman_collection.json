@@ -7,7 +7,8 @@
     { "key": "baseUrl", "value": "http://localhost:4000" },
     { "key": "msmeToken", "value": "" },
     { "key": "buyerToken", "value": "" },
-    { "key": "consentId", "value": "" }
+    { "key": "consentId", "value": "" },
+    { "key": "reportId", "value": "" }
   ],
   "item": [
     {
@@ -79,6 +80,70 @@
         "method": "POST",
         "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
         "url": "{{baseUrl}}/api/readiness-profiles/vendor-onboarding/evaluate"
+      }
+    },
+    {
+      "name": "Reports - List Types",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/report-types"
+      }
+    },
+    {
+      "name": "Reports - Generate Business Trust Profile",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{msmeToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/reports/generate",
+        "body": { "mode": "raw", "raw": "{\"reportType\":\"BUSINESS_TRUST_PROFILE\"}" }
+      }
+    },
+    {
+      "name": "Reports - Generate Vendor Readiness",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{msmeToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/reports/generate",
+        "body": { "mode": "raw", "raw": "{\"reportType\":\"VENDOR_ONBOARDING_READINESS\"}" }
+      }
+    },
+    {
+      "name": "Reports - List",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/reports"
+      }
+    },
+    {
+      "name": "Reports - Get",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/reports/{{reportId}}"
+      }
+    },
+    {
+      "name": "Reports - Revoke",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{msmeToken}}" }],
+        "url": "{{baseUrl}}/api/reports/{{reportId}}/revoke"
+      }
+    },
+    {
+      "name": "Reports - Buyer Forbidden",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{buyerToken}}" }],
+        "url": "{{baseUrl}}/api/reports/{{reportId}}"
       }
     },
     {

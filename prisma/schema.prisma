@@ -38,6 +38,14 @@ enum ReadinessLevel {
   BLOCKED
 }
 
+enum ReportType {
+  BUSINESS_TRUST_PROFILE
+  VENDOR_ONBOARDING_READINESS
+  LOAN_APPLICATION_PREPARATION
+  GOVERNMENT_PROCUREMENT_READINESS
+  GOVERNMENT_SCHEME_APPLICATION_READINESS
+}
+
 enum DocumentType {
   GST_CERTIFICATE
   UDYAM_CERTIFICATE
@@ -75,6 +83,8 @@ enum AuditAction {
   READINESS_PROFILE_EVALUATED
   READINESS_PROFILE_BLOCKED
   READINESS_PROFILE_SHARED
+  REPORT_GENERATED
+  REPORT_REVOKED
 }
 
 model User {
@@ -89,6 +99,7 @@ model User {
   consentRequests  ConsentRequest[] @relation("RequesterConsents")
   auditLogs        AuditLog[]        @relation("ActorAuditLogs")
   notifications    Notification[]
+  generatedReports GeneratedReport[] @relation("ReportCreator")
 }
 
 model Business {
@@ -112,6 +123,7 @@ model Business {
   consentRequests    ConsentRequest[]
   auditLogs          AuditLog[]
   readinessEvaluations ReadinessEvaluation[]
+  generatedReports   GeneratedReport[]
 }
 
 model Document {
@@ -198,4 +210,24 @@ model ReadinessEvaluation {
   summaryJson    Json
   evaluatedAt    DateTime       @default(now())
   business       Business       @relation(fields: [businessId], references: [id])
+}
+
+model GeneratedReport {
+  id                    String     @id @default(cuid())
+  businessId            String
+  reportType            ReportType
+  reportVersion         String
+  trustProfileId        String?
+  readinessEvaluationId String?
+  snapshotJson          Json
+  generatedAt           DateTime   @default(now())
+  expiresAt             DateTime?
+  revokedAt             DateTime?
+  createdByUserId       String
+  business              Business   @relation(fields: [businessId], references: [id])
+  createdBy             User       @relation("ReportCreator", fields: [createdByUserId], references: [id])
+
+  @@index([businessId, generatedAt])
+  @@index([reportType])
+  @@index([readinessEvaluationId])
 }
