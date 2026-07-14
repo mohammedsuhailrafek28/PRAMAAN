@@ -37,15 +37,21 @@ Important truth rule: PRAMAAN does not mark submitted data as externally verifie
 ```bash
 npm install
 copy .env.example .env
-npm run prisma:generate
 npm run db:init
-npm run prisma:seed
+npm run db:seed
+npm run prisma:generate
 npm run dev
 ```
 
 The API runs at `http://localhost:4000`.
 
-Note: `npm run db:init` creates or updates the local SQLite demo tables, including Trust OS foundation columns. Prisma migration SQL is also documented under `prisma/migrations`.
+`npm run db:init` prepares the SQLite file, reconciles any known legacy local schema, and then applies checked-in Prisma migrations. It no longer creates application tables through a separate shadow migration path.
+
+Prisma migration tracking is authoritative going forward. Fresh databases and reconciled legacy databases should report cleanly with:
+
+```bash
+npm run db:status
+```
 
 ## API Docs
 
@@ -192,9 +198,53 @@ curl -X POST http://localhost:4000/api/reports/<report-id>/revoke \
 | `npm test` | Run deterministic Trust Engine tests |
 | `npm run smoke` | Run the real HTTP end-to-end smoke test |
 | `npm run prisma:generate` | Generate Prisma Client |
-| `npm run prisma:migrate` | Run Prisma migrations where supported |
-| `npm run db:init` | Initialize or update local SQLite demo DB |
-| `npm run prisma:seed` | Seed demo users, business, and sample document rows |
+| `npm run db:migrate` | Prepare the SQLite file and run `prisma migrate deploy` |
+| `npm run db:reconcile` | Reconcile known legacy SQLite databases with Prisma migration tracking |
+| `npm run db:init` | Safe local initializer: reconcile/preflight, then apply migrations |
+| `npm run db:status` | Show Prisma migration status |
+| `npm run db:seed` | Seed demo users, business, and sample document rows |
+| `npm run prisma:migrate` | Backward-compatible alias for deploy-style migrations |
+| `npm run prisma:seed` | Backward-compatible seed alias |
+
+## Database Lifecycle
+
+Earlier local versions used `prisma/init-sqlite.ts` to create and alter SQLite tables directly. That produced a correct application schema, but Prisma did not record the checked-in migrations in `_prisma_migrations`, so `npx prisma migrate status` could report migrations as unapplied.
+
+The current lifecycle separates compatibility from schema authority:
+
+Fresh local development:
+
+```bash
+npm install
+copy .env.example .env
+npm run db:init
+npm run db:seed
+npm run prisma:generate
+npm run dev
+```
+
+Existing legacy SQLite database:
+
+```bash
+npm run db:reconcile
+npm run db:migrate
+npm run db:status
+```
+
+Production or deployment:
+
+```bash
+npm run db:migrate
+npm run prisma:generate
+npm run build
+npm start
+```
+
+`npm run db:reconcile` is SQLite-only. It inspects tables, columns, indexes, and Prisma migration records before doing anything. If a known legacy database already matches a migration, it uses Prisma-supported migration resolution. If a known old local schema needs compatibility columns or tables, it creates a timestamped `.db.backup-*` file before mutation, upgrades only the known safe schema pieces, and then reconciles migration tracking. It stops on incompatible or contradictory states.
+
+The reconciliation path does not promote historical uploads or old `verifiedFlag` values to `SOURCE_VERIFIED`; legacy uploaded documents remain `DOCUMENT_SUBMITTED` unless a real future source adapter explicitly changes them.
+
+For production, use `npm run db:migrate` or `npx prisma migrate deploy`. Do not use `prisma db push`, `prisma migrate dev`, or direct schema mutation helpers in deployment.
 
 ## Smoke Test
 
@@ -204,7 +254,7 @@ Run the full backend Trust OS sequence:
 npm install
 npm run prisma:generate
 npm run db:init
-npm run prisma:seed
+npm run db:seed
 npm run build
 npm test
 npm run smoke
@@ -254,10 +304,12 @@ Docker Compose starts the backend on `http://localhost:4000` and persists SQLite
 
 The container uses SQLite-first local persistence and does not require Postgres.
 
+The Docker command uses the safe local initializer before starting the server. For multi-replica or production-style deployments, run migrations once as a dedicated step with `npm run db:migrate` before starting application processes.
+
 To seed demo data inside the running container:
 
 ```bash
-docker compose exec backend npm run prisma:seed
+docker compose exec backend npm run db:seed
 ```
 
 ## API Summary

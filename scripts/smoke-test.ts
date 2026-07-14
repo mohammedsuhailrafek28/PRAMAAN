@@ -5,8 +5,10 @@ import path from "node:path";
 const root = process.cwd();
 const port = Number(process.env.SMOKE_PORT ?? 4100);
 const baseUrl = `http://127.0.0.1:${port}`;
-const dbPath = path.join(root, "prisma", "dev.db");
-const uploadsDir = path.join(root, "uploads");
+const smokeId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const smokeDbDir = path.join(root, "prisma", ".tmp-smoke", smokeId);
+const databaseUrl = `file:./.tmp-smoke/${smokeId}/smoke.db`;
+const uploadsDir = path.join(root, ".tmp-smoke-uploads", smokeId);
 const fixturesDir = path.join(root, "test-fixtures");
 
 type Json = Record<string, any>;
@@ -36,14 +38,14 @@ function assert(condition: unknown, message: string): asserts condition {
 function run(command: string, args: string[]) {
   log(`RUN ${command} ${args.join(" ")}`);
   if (process.platform === "win32") {
-    execSync(`${command} ${args.join(" ")}`, { cwd: root, stdio: "inherit", env: process.env });
+    execSync(`${command} ${args.join(" ")}`, { cwd: root, stdio: "inherit", env: { ...process.env, DATABASE_URL: databaseUrl, UPLOAD_DIR: uploadsDir } });
     return;
   }
 
   execFileSync(command, args, {
     cwd: root,
     stdio: "inherit",
-    env: process.env
+    env: { ...process.env, DATABASE_URL: databaseUrl, UPLOAD_DIR: uploadsDir }
   });
 }
 
@@ -107,15 +109,37 @@ function startServer() {
   const tsxCli = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
   server = spawn(process.execPath, [tsxCli, "src/server.ts"], {
     cwd: root,
-    env: { ...process.env, PORT: String(port), DATABASE_URL: "file:./dev.db" }
+    env: { ...process.env, PORT: String(port), DATABASE_URL: databaseUrl, UPLOAD_DIR: uploadsDir }
   });
 
   server.stdout.on("data", (chunk) => process.stdout.write(`[server] ${chunk}`));
   server.stderr.on("data", (chunk) => process.stderr.write(`[server] ${chunk}`));
 }
 
-function cleanup() {
+function killServer() {
   if (server && !server.killed) server.kill();
+}
+
+async function cleanup() {
+  if (server && !server.killed) {
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(resolve, 1500);
+      server?.once("exit", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+      server?.kill();
+    });
+  }
+
+  for (const dir of [smokeDbDir, uploadsDir]) {
+    if (!existsSync(dir)) continue;
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch (error) {
+      console.warn(`WARN Could not remove temporary smoke directory ${dir}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 }
 
 function createFixture(name: string, content: string) {
@@ -137,14 +161,15 @@ function getActions(audit: Json) {
 }
 
 async function main() {
-  process.on("exit", cleanup);
+  process.on("exit", killServer);
   process.on("SIGINT", () => {
-    cleanup();
+    killServer();
     process.exit(1);
   });
 
-  if (existsSync(dbPath)) rmSync(dbPath, { force: true });
+  if (existsSync(smokeDbDir)) rmSync(smokeDbDir, { recursive: true, force: true });
   if (existsSync(uploadsDir)) rmSync(uploadsDir, { recursive: true, force: true });
+  mkdirSync(smokeDbDir, { recursive: true });
   mkdirSync(uploadsDir, { recursive: true });
 
   run(npmCmd(), ["run", "prisma:generate"]);
@@ -466,7 +491,7 @@ async function main() {
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   } finally {
-    cleanup();
+    await cleanup();
   }
 
   if (failures > 0) {
@@ -478,7 +503,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  cleanup();
+  killServer();
   console.error(error);
   process.exit(1);
 });
