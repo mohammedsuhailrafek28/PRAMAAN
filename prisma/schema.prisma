@@ -88,6 +88,15 @@ enum AuditAction {
   REPORT_HTML_VIEWED
   REPORT_HTML_DOWNLOADED
   REPORT_PDF_DOWNLOADED
+  ACCESS_GRANT_CREATED
+  ACCESS_GRANT_VIEWED
+  ACCESS_GRANT_REVOKED
+  ACCESS_GRANT_EXPIRED
+}
+
+enum AccessGrantStatus {
+  ACTIVE
+  REVOKED
 }
 
 model User {
@@ -103,6 +112,8 @@ model User {
   auditLogs        AuditLog[]        @relation("ActorAuditLogs")
   notifications    Notification[]
   generatedReports GeneratedReport[] @relation("ReportCreator")
+  accessGrantsCreated AccessGrant[] @relation("GrantCreator")
+  accessGrantsRequested AccessGrant[] @relation("GrantRequester")
 }
 
 model Business {
@@ -127,6 +138,7 @@ model Business {
   auditLogs          AuditLog[]
   readinessEvaluations ReadinessEvaluation[]
   generatedReports   GeneratedReport[]
+  accessGrants       AccessGrant[]
 }
 
 model Document {
@@ -187,16 +199,43 @@ model ConsentRequest {
   notifications   Notification[]
 }
 
+model AccessGrant {
+  id                    String           @id @default(cuid())
+  businessId            String
+  createdByUserId       String
+  requesterId           String?
+  recipientName         String?
+  recipientOrganization String?
+  recipientEmail        String?
+  purpose               String
+  scopeJson             Json
+  tokenHash             String           @unique
+  status                AccessGrantStatus @default(ACTIVE)
+  createdAt             DateTime         @default(now())
+  expiresAt             DateTime
+  revokedAt             DateTime?
+  lastAccessedAt        DateTime?
+  business              Business         @relation(fields: [businessId], references: [id])
+  createdBy             User             @relation("GrantCreator", fields: [createdByUserId], references: [id])
+  requester             User?            @relation("GrantRequester", fields: [requesterId], references: [id])
+  auditLogs             AuditLog[]
+
+  @@index([businessId, createdAt])
+  @@index([status, expiresAt])
+}
+
 model AuditLog {
   id               String          @id @default(cuid())
   businessId       String
   consentRequestId String?
+  accessGrantId    String?
   actorId          String
   action           AuditAction
   metadata         Json?
   createdAt        DateTime        @default(now())
   business         Business        @relation(fields: [businessId], references: [id])
   consentRequest   ConsentRequest? @relation(fields: [consentRequestId], references: [id])
+  accessGrant      AccessGrant? @relation(fields: [accessGrantId], references: [id])
   actor            User            @relation("ActorAuditLogs", fields: [actorId], references: [id])
 }
 

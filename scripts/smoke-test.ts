@@ -564,6 +564,53 @@ async function main() {
     assert(msmeNotifications.data.notifications.length > 0, "MSME notifications missing");
     assert(buyerNotifications.data.notifications.length > 0, "buyer notifications missing");
     pass("Z. notification lifecycle has expected MSME and buyer messages");
+
+    const guestGrant = await request("POST", "/api/access-grants", {
+      token: msmeToken,
+      body: {
+        recipientName: "Procurement reviewer",
+        recipientOrganization: "External Verification Desk",
+        purpose: "Vendor onboarding",
+        scope: { fields: ["legalBusinessName", "gstin"], evidenceTypes: ["GST_CERTIFICATE", "UDYAM_CERTIFICATE"] },
+        durationHours: 24
+      }
+    });
+    const guestUrl = guestGrant.data.grant.secureUrl as string;
+    const guestToken = guestUrl.split("/verify/")[1];
+    assert(guestToken && guestToken.length >= 40, "guest token is not high entropy");
+    assert(!JSON.stringify(guestGrant.data).includes("tokenHash"), "token hash leaked at creation");
+    const guestView = await request("GET", `/api/public/verify/${guestToken}`);
+    assert(guestView.data.grant.purpose === "Vendor onboarding", "guest purpose missing");
+    assert(Object.keys(guestView.data.sharedFields).sort().join(",") === "gstin,legalBusinessName", "guest field scope leaked or missing");
+    assert(guestView.data.evidence.length === 2, "guest evidence scope missing");
+    assert(!JSON.stringify(guestView.data).includes("filePath"), "guest file path leaked");
+    const limitedGrant = await request("POST", "/api/access-grants", { token: msmeToken, body: { purpose: "Other", scope: { fields: ["gstin"] }, durationHours: 24 } });
+    const limitedToken = (limitedGrant.data.grant.secureUrl as string).split("/verify/")[1];
+    const limitedView = await request("GET", `/api/public/verify/${limitedToken}`);
+    assert(limitedView.data.business.legalName === undefined && limitedView.data.sharedFields.legalBusinessName === undefined, "unselected legal name leaked");
+    audit = await request("GET", "/api/audit-logs", { token: msmeToken });
+    assert(getActions(audit.data).includes("ACCESS_GRANT_CREATED") && getActions(audit.data).includes("ACCESS_GRANT_VIEWED"), "guest audit lifecycle missing");
+    pass("AA. MSME creates secure external link and unauthenticated guest sees only allowlisted current scope");
+
+    await expectBlocked("GET", "/api/public/verify/not-a-real-token", undefined, ["INVALID_ACCESS_LINK"], "random guest token");
+    await expectBlocked("GET", "/api/public/verify/abc", undefined, ["INVALID_ACCESS_LINK"], "malformed guest token");
+    const grants = await request("GET", "/api/access-grants", { token: msmeToken });
+    assert(grants.data.grants.some((item: Json) => item.id === guestGrant.data.grant.id && item.lastAccessedAt), "active access last accessed missing");
+    const revokedGrant = await request("PATCH", `/api/access-grants/${guestGrant.data.grant.id}/revoke`, { token: msmeToken });
+    assert(revokedGrant.data.grant.status === "REVOKED", "guest grant not revoked");
+    await expectBlocked("GET", `/api/public/verify/${guestToken}`, undefined, ["ACCESS_REVOKED"], "revoked guest token");
+    await expectBlocked("PATCH", `/api/access-grants/${guestGrant.data.grant.id}/revoke`, otherMsme.data.token, ["NOT_FOUND"], "other MSME grant revoke");
+    pass("AB. external link revocation, ownership enforcement, and invalid-token behavior are server-enforced");
+
+    const expiryAt = new Date(Date.now() + 1500).toISOString();
+    const expiringGrant = await request("POST", "/api/access-grants", {
+      token: msmeToken,
+      body: { purpose: "Business verification", scope: { fields: ["legalBusinessName"] }, expiresAt: expiryAt }
+    });
+    const expiringToken = (expiringGrant.data.grant.secureUrl as string).split("/verify/")[1];
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    await expectBlocked("GET", `/api/public/verify/${expiringToken}`, undefined, ["ACCESS_EXPIRED"], "expired guest token");
+    pass("AC. guest expiry is enforced by the backend rather than a frontend timer");
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   } finally {

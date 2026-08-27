@@ -13,3 +13,4 @@ dev.db-journal
 .DS_Store
 *.log
 test-fixtures/
+phase3-*.png

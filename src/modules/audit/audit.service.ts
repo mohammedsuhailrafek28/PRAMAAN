@@ -7,6 +7,7 @@ export async function writeAuditLog(input: {
   actorId: string;
   action: AuditAction;
   consentRequestId?: string | null;
+  accessGrantId?: string | null;
   metadata?: Prisma.InputJsonValue;
 }) {
   return prisma.auditLog.create({
@@ -15,6 +16,7 @@ export async function writeAuditLog(input: {
       actorId: input.actorId,
       action: input.action,
       consentRequestId: input.consentRequestId,
+      accessGrantId: input.accessGrantId,
       metadata: input.metadata
     }
   });
