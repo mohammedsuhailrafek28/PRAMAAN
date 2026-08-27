@@ -47,6 +47,22 @@ npm run dev
 
 The API runs at `http://localhost:4000`.
 
+### Running with Docker
+
+The local SQLite database is persisted in the `prisma/` directory through the compose volume:
+
+```bash
+docker compose up --build
+```
+
+Stop the service with `docker compose down`. For a clean deterministic demo database, run:
+
+```bash
+npm run demo:reset
+```
+
+This removes only the configured local SQLite file after verifying it is inside this project, then applies migrations and reseeds the demo accounts. Do not run it against a production database.
+
 `npm run db:init` prepares the SQLite file, reconciles any known legacy local schema, and then applies checked-in Prisma migrations. It no longer creates application tables through a separate shadow migration path.
 
 Prisma migration tracking is authoritative going forward. Fresh databases and reconciled legacy databases should report cleanly with:
@@ -236,6 +252,7 @@ curl -X POST http://localhost:4000/api/reports/<report-id>/revoke \
 | `npm start` | Run compiled server |
 | `npm test` | Run deterministic Trust Engine tests |
 | `npm run smoke` | Run the real HTTP end-to-end smoke test |
+| `npm run demo:reset` | Reset the local SQLite demo database and reseed deterministic accounts |
 | `npm run browser:install` | Install Playwright Chromium for PDF rendering |
 | `npm run test:reports` | Run report composer and report rendering tests |
 | `npm run prisma:generate` | Generate Prisma Client |

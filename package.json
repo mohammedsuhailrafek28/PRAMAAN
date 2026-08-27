@@ -10,6 +10,7 @@
     "test": "tsx scripts/trust-engine-tests.ts && tsx scripts/readiness-engine-tests.ts && tsx scripts/report-composer-tests.ts && tsx scripts/report-rendering-tests.ts && tsx scripts/migration-lifecycle-tests.ts && tsx scripts/evidence-lifecycle-tests.ts",
     "test:reports": "tsx scripts/report-composer-tests.ts && tsx scripts/report-rendering-tests.ts",
     "smoke": "tsx scripts/smoke-test.ts",
+    "demo:reset": "tsx scripts/demo-reset.ts",
     "browser:install": "playwright install chromium",
     "db:init": "tsx prisma/init-sqlite.ts",
     "db:migrate": "tsx scripts/prepare-sqlite-database.ts && prisma migrate deploy",
