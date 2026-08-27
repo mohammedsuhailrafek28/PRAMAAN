@@ -6,7 +6,7 @@ import { runInternalCrossCheck, statusFromProfile } from "./cross-check-engine.j
 export async function calculateBusinessTrustProfile(businessId: string) {
   const business = await prisma.business.findUnique({
     where: { id: businessId },
-    include: { user: true, documents: true }
+    include: { user: true, documents: { where: { isCurrent: true } } }
   });
   if (!business) throw new ApiError(404, "NOT_FOUND", "Business profile not found.");
 

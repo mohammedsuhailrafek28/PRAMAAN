@@ -142,11 +142,20 @@ model Document {
   confidenceReason String?
   crossCheckMethod String?
   source          String?
+  issuedAt        DateTime?
   checkedAt       DateTime?
   expiresAt       DateTime?
+  revision        Int            @default(1)
+  isCurrent       Boolean        @default(true)
+  previousVersionId String?
   contradictionDetails Json?
   uploadedAt   DateTime     @default(now())
   business     Business     @relation(fields: [businessId], references: [id])
+  previousVersion Document? @relation("DocumentRevisions", fields: [previousVersionId], references: [id])
+  nextVersions   Document[] @relation("DocumentRevisions")
+
+  @@index([businessId, docType, isCurrent])
+  @@index([previousVersionId])
 }
 
 model Passport {

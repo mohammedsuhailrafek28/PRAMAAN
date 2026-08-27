@@ -27,7 +27,10 @@ const businessSchema = z.object({
 });
 
 const docSchema = z.object({
-  docType: z.nativeEnum(DocumentType)
+  docType: z.nativeEnum(DocumentType),
+  issuedAt: z.string().optional(),
+  expiresAt: z.string().optional(),
+  source: z.string().trim().max(120).optional()
 });
 
 const lookupParams = z.object({ gstin: z.string().trim().min(1).max(15).toUpperCase() });

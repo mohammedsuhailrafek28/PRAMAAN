@@ -82,6 +82,15 @@ const migrations = [
     tables: [],
     columns: {},
     indexes: []
+  },
+  {
+    name: "20260827120829_evidence_lifecycle",
+    file: path.join(root, "prisma", "migrations", "20260827120829_evidence_lifecycle", "migration.sql"),
+    tables: [],
+    columns: {
+      Document: ["issuedAt", "revision", "isCurrent", "previousVersionId"]
+    },
+    indexes: ["Document_businessId_docType_isCurrent_idx", "Document_previousVersionId_idx"]
   }
 ] as const;
 
@@ -269,8 +278,10 @@ export function reconcilePrismaMigrations(options: { deploy?: boolean; status?: 
     const applied = appliedMigrationNames(db);
     const trustComplete = verifyMigrationShape(db, migrations[0]);
     const reportComplete = verifyMigrationShape(db, migrations[1]);
+    const evidenceComplete = verifyMigrationShape(db, migrations[3]);
     const trustApplied = applied.includes(migrations[0].name);
     const reportApplied = applied.includes(migrations[1].name);
+    const evidenceApplied = applied.includes(migrations[3].name);
 
     report.push(`Database: ${dbPath}`);
     report.push(`Datasource: sqlite`);
@@ -290,6 +301,9 @@ export function reconcilePrismaMigrations(options: { deploy?: boolean; status?: 
     if (reportApplied && !reportComplete) {
       throw new Error(`${migrations[1].name} is recorded as applied, but its schema objects are missing or incomplete.`);
     }
+    if (evidenceApplied && !evidenceComplete) {
+      throw new Error(`${migrations[3].name} is recorded as applied, but its schema objects are missing or incomplete.`);
+    }
     if (hasSourceVerifiedPromotion(db)) {
       throw new Error("Existing Document rows contain SOURCE_VERIFIED. Reconciliation will not bless unverifiable evidence state.");
     }
@@ -303,7 +317,7 @@ export function reconcilePrismaMigrations(options: { deploy?: boolean; status?: 
       return { state: "fresh", backupPath };
     }
 
-    if (trustApplied && reportApplied && trustComplete && reportComplete) {
+    if (trustApplied && reportApplied && evidenceApplied && trustComplete && reportComplete && evidenceComplete) {
       report.push("State: fully migrated and tracked");
       db.close();
       if (options.deploy ?? true) prismaDeploy();

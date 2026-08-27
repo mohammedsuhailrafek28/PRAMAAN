@@ -68,8 +68,12 @@ function documentFixture(id: string, docType: DocumentType, overrides: Record<st
     confidenceReason: null,
     crossCheckMethod: null,
     source: null,
+    issuedAt: null,
     checkedAt: null,
     expiresAt: null,
+    revision: 1,
+    isCurrent: true,
+    previousVersionId: null,
     contradictionDetails: null,
     uploadedAt: new Date("2026-07-13T00:00:00.000Z"),
     ...overrides

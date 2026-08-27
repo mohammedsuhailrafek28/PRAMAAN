@@ -165,10 +165,11 @@ function createFixture(name: string, content: string) {
   return filePath;
 }
 
-async function uploadDocument(token: string, docType: string, filePath: string) {
+async function uploadDocument(token: string, docType: string, filePath: string, metadata: Record<string, string> = {}) {
   const form = new FormData();
   form.set("docType", docType);
   form.set("file", new Blob([readFileSync(filePath)], { type: "application/pdf" }), path.basename(filePath));
+  for (const [key, value] of Object.entries(metadata)) form.set(key, value);
   return request("POST", "/api/business/documents", { token, form });
 }
 
@@ -236,8 +237,8 @@ async function main() {
 
     const gstFile = createFixture("gst-certificate.pdf", "%PDF-1.4 smoke GST certificate\n");
     const udyamFile = createFixture("udyam-certificate.pdf", "%PDF-1.4 smoke Udyam certificate\n");
-    const gstUpload = await uploadDocument(msmeToken, "GST_CERTIFICATE", gstFile);
-    const udyamUpload = await uploadDocument(msmeToken, "UDYAM_CERTIFICATE", udyamFile);
+    const gstUpload = await uploadDocument(msmeToken, "GST_CERTIFICATE", gstFile, { issuedAt: "2026-01-01", expiresAt: "2027-01-01", source: "MSME submitted" });
+    const udyamUpload = await uploadDocument(msmeToken, "UDYAM_CERTIFICATE", udyamFile, { issuedAt: "2026-01-01", source: "MSME submitted" });
     assert(gstUpload.data.documentId && udyamUpload.data.documentId, "document IDs missing");
     pass("D. multipart identity document uploads are recorded");
 
@@ -255,6 +256,16 @@ async function main() {
       "SOURCE_VERIFIED was produced without a source adapter"
     );
     pass("E. internal cross-check returns field confidence, document confidence, and trust metrics");
+
+    const replacementFile = createFixture("gst-certificate-v2.pdf", "%PDF-1.4 replacement GST certificate\n");
+    const replacement = await uploadDocument(msmeToken, "GST_CERTIFICATE", replacementFile, { issuedAt: "2026-02-01", expiresAt: "2027-02-01", source: "MSME replacement" });
+    const afterReplacement = await request("GET", "/api/business/me", { token: msmeToken });
+    const gstDocuments = afterReplacement.data.business.documents.filter((document: Json) => document.docType === "GST_CERTIFICATE");
+    assert(replacement.data.document.revision === 2, "replacement revision did not increment");
+    assert(gstDocuments.some((document: Json) => document.id === gstUpload.data.documentId && document.isCurrent === false), "old GST evidence was not historical");
+    assert(gstDocuments.some((document: Json) => document.id === replacement.data.documentId && document.isCurrent === true), "replacement GST evidence is not current");
+    assert(replacement.data.document.lifecycle.state === "CURRENT", "replacement lifecycle is not current");
+    pass("E2. evidence replacement increments revision and preserves historical evidence");
 
     const passportCreate = await request("POST", "/api/passport/generate", { token: msmeToken });
     assert(passportCreate.data.passportId, "passport ID missing");

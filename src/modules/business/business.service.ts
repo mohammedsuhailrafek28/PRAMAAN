@@ -3,6 +3,7 @@ import { prisma } from "../../config/prisma.js";
 import { ApiError } from "../../utils/apiError.js";
 import { writeAuditLog } from "../audit/audit.service.js";
 import { calculateAndPersistBusinessTrustProfile } from "../trustEngine/trust-engine.service.js";
+import { deriveEvidenceLifecycle, parseLifecycleDate } from "../evidence/evidence-lifecycle.service.js";
 
 type BusinessInput = {
   legalName: string;
@@ -12,6 +13,33 @@ type BusinessInput = {
   address: string;
   turnoverBand: string;
 };
+
+type DocumentMetadata = { issuedAt?: string; expiresAt?: string; source?: string };
+
+export function serializeDocument(document: any) {
+  return {
+    id: document.id,
+    businessId: document.businessId,
+    docType: document.docType,
+    originalName: document.originalName,
+    mimeType: document.mimeType,
+    verifiedFlag: document.verifiedFlag,
+    evidenceStatus: document.evidenceStatus,
+    confidence: document.confidence,
+    confidenceReason: document.confidenceReason,
+    crossCheckMethod: document.crossCheckMethod,
+    source: document.source,
+    issuedAt: document.issuedAt,
+    checkedAt: document.checkedAt,
+    expiresAt: document.expiresAt,
+    contradictionDetails: document.contradictionDetails,
+    uploadedAt: document.uploadedAt,
+    revision: document.revision,
+    isCurrent: document.isCurrent,
+    previousVersionId: document.previousVersionId,
+    lifecycle: deriveEvidenceLifecycle(document)
+  };
+}
 
 export async function upsertProfile(userId: string, input: BusinessInput) {
   const existing = await prisma.business.findUnique({ where: { userId } });
@@ -48,7 +76,7 @@ export async function getMine(userId: string) {
   const business = await prisma.business.findUnique({
     where: { userId },
     include: {
-      documents: true,
+      documents: { orderBy: [{ docType: "asc" }, { revision: "desc" }] },
       passports: { orderBy: { version: "desc" }, take: 1 }
     }
   });
@@ -59,7 +87,7 @@ export async function getMine(userId: string) {
     lastCrossCheckedAt: business.lastCrossCheckedAt,
     sourceVerificationPerformed: false
   };
-  return { ...business, trustOs: conciseTrustSummary };
+  return { ...business, documents: business.documents.map(serializeDocument), trustOs: conciseTrustSummary };
 }
 
 export async function lookupByGstin(gstin: string) {
@@ -74,7 +102,8 @@ export async function lookupByGstin(gstin: string) {
 export async function uploadDocument(
   userId: string,
   docType: DocumentType,
-  file: Express.Multer.File | undefined
+  file: Express.Multer.File | undefined,
+  metadata: DocumentMetadata = {}
 ) {
   if (!file) throw new ApiError(400, "VALIDATION_ERROR", "Document file is required.");
 
@@ -86,17 +115,43 @@ export async function uploadDocument(
   const business = await prisma.business.findUnique({ where: { userId } });
   if (!business) throw new ApiError(404, "NOT_FOUND", "Business profile not found.");
 
-  const document = await prisma.document.create({
-    data: {
-      businessId: business.id,
-      docType,
-      filePath: file.path,
-      originalName: file.originalname,
-      mimeType: file.mimetype,
-      evidenceStatus: EvidenceStatus.DOCUMENT_SUBMITTED,
-      confidence: 45,
-      confidenceReason: "A supported evidence file was submitted. Its contents were not parsed or externally verified."
-    }
+  let issuedAt: Date | undefined;
+  let expiresAt: Date | undefined;
+  try {
+    issuedAt = parseLifecycleDate(metadata.issuedAt, "issuedAt");
+    expiresAt = parseLifecycleDate(metadata.expiresAt, "expiresAt");
+  } catch (error) {
+    throw new ApiError(400, "VALIDATION_ERROR", error instanceof Error ? error.message : "Invalid lifecycle metadata.");
+  }
+  if (issuedAt && expiresAt && expiresAt.getTime() < issuedAt.getTime()) {
+    throw new ApiError(400, "VALIDATION_ERROR", "expiresAt cannot be earlier than issuedAt.");
+  }
+
+  const previous = await prisma.document.findFirst({
+    where: { businessId: business.id, docType, isCurrent: true },
+    orderBy: { revision: "desc" }
+  });
+
+  const document = await prisma.$transaction(async (tx) => {
+    await tx.document.updateMany({ where: { businessId: business.id, docType, isCurrent: true }, data: { isCurrent: false } });
+    return tx.document.create({
+      data: {
+        businessId: business.id,
+        docType,
+        filePath: file.path,
+        originalName: file.originalname,
+        mimeType: file.mimetype,
+        evidenceStatus: EvidenceStatus.DOCUMENT_SUBMITTED,
+        confidence: 45,
+        confidenceReason: "A supported evidence file was submitted. Its contents were not parsed or externally verified.",
+        issuedAt,
+        expiresAt,
+        source: metadata.source?.trim() || "MSME_SUBMITTED",
+        revision: (previous?.revision ?? 0) + 1,
+        isCurrent: true,
+        previousVersionId: previous?.id
+      }
+    });
   });
 
   await writeAuditLog({
@@ -106,11 +161,13 @@ export async function uploadDocument(
     metadata: {
       documentId: document.id,
       documentType: document.docType,
-      evidenceStatus: document.evidenceStatus
+      evidenceStatus: document.evidenceStatus,
+      revision: document.revision,
+      replacedDocumentId: previous?.id
     }
   });
 
-  return document;
+  return serializeDocument(document);
 }
 
 export async function crossCheck(user: Express.User) {
