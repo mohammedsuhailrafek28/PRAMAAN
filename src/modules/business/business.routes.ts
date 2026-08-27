@@ -30,6 +30,10 @@ const docSchema = z.object({
   docType: z.nativeEnum(DocumentType)
 });
 
+const lookupParams = z.object({ gstin: z.string().trim().min(1).max(15).toUpperCase() });
+
+router.get("/lookup/:gstin", requireAuth, requireRole([UserRole.BUYER, UserRole.BANK]), validate({ params: lookupParams }), asyncHandler(controller.lookup));
+
 router.use(requireAuth, requireRole([UserRole.MSME]));
 router.post("/", validate({ body: businessSchema }), asyncHandler(controller.upsert));
 router.get("/me", asyncHandler(controller.getMine));

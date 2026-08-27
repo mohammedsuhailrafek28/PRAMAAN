@@ -62,6 +62,15 @@ export async function getMine(userId: string) {
   return { ...business, trustOs: conciseTrustSummary };
 }
 
+export async function lookupByGstin(gstin: string) {
+  const business = await prisma.business.findUnique({
+    where: { gstin: gstin.trim().toUpperCase() },
+    select: { id: true, legalName: true, gstin: true, address: true, trustStatus: true }
+  });
+  if (!business) throw new ApiError(404, "NOT_FOUND", "Business profile not found.");
+  return business;
+}
+
 export async function uploadDocument(
   userId: string,
   docType: DocumentType,

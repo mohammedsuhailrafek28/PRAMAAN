@@ -14,3 +14,7 @@ export async function login(req: Request, res: Response) {
 export async function logout(_req: Request, res: Response) {
   res.json({ success: true, message: "Discard the JWT on the client to log out." });
 }
+
+export async function me(req: Request, res: Response) {
+  res.json(await authService.getCurrentUser(req.user!.id));
+}

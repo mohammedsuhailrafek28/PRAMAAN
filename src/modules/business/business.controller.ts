@@ -10,6 +10,11 @@ export async function getMine(req: Request, res: Response) {
   res.json({ business: await businessService.getMine(req.user!.id) });
 }
 
+export async function lookup(req: Request, res: Response) {
+  const gstin = Array.isArray(req.params.gstin) ? req.params.gstin[0] : req.params.gstin;
+  res.json({ business: await businessService.lookupByGstin(gstin) });
+}
+
 export async function patchMine(req: Request, res: Response) {
   res.json({ business: await businessService.upsertProfile(req.user!.id, req.body) });
 }
