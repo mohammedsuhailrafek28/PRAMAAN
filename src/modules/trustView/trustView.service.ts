@@ -53,6 +53,24 @@ export async function getTrustView(userId: string, consentRequestId: string) {
   const viewedAt = new Date();
   const approvedFields = (consent.approvedFields ?? []) as string[];
   const sharedFields = filterPassportFields(passport.snapshotJson, approvedFields);
+  const approvedEvidenceTypes = approvedFields.flatMap((field) => field === "gstin" ? ["GST_CERTIFICATE"] : field === "udyamNumber" ? ["UDYAM_CERTIFICATE"] : field === "bankAccount" || field === "documentConfidence" ? ["BANK_STATEMENT"] : []);
+  const evidence = (await prisma.document.findMany({
+    where: { businessId: consent.businessId, isCurrent: true, docType: { in: [...new Set(approvedEvidenceTypes)] as never[] } },
+    orderBy: { uploadedAt: "desc" }
+  })).map((document) => ({
+    docType: document.docType,
+    originalName: document.originalName,
+    mimeType: document.mimeType,
+    evidenceStatus: document.evidenceStatus,
+    confidence: document.confidence,
+    confidenceReason: document.confidenceReason,
+    crossCheckMethod: document.crossCheckMethod,
+    source: document.source,
+    issuedAt: document.issuedAt,
+    checkedAt: document.checkedAt,
+    expiresAt: document.expiresAt,
+    uploadedAt: document.uploadedAt
+  }));
 
   await writeAuditLog({
     businessId: consent.businessId,
@@ -69,7 +87,9 @@ export async function getTrustView(userId: string, consentRequestId: string) {
     metadata: {
       accessGrantedAt: consent.approvedAt,
       expiresAt: consent.expiresAt,
+      purpose: consent.purpose,
       viewedAt
-    }
+    },
+    evidence
   };
 }

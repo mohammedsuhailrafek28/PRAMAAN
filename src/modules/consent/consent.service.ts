@@ -24,7 +24,7 @@ async function requireOwnedConsent(userId: string, consentId: string) {
   return consent;
 }
 
-export async function create(user: Express.User, input: { businessGstin: string; requestedFields: string[] }) {
+export async function create(user: Express.User, input: { businessGstin: string; requestedFields: string[]; purpose?: string }) {
   if (user.role !== UserRole.BUYER && user.role !== UserRole.BANK) {
     throw new ApiError(403, "FORBIDDEN", "Only buyers and banks can request access.");
   }
@@ -41,6 +41,7 @@ export async function create(user: Express.User, input: { businessGstin: string;
       requesterId: user.id,
       businessId: business.id,
       requestedFields: input.requestedFields as Prisma.InputJsonValue,
+      purpose: input.purpose,
       status: ConsentStatus.PENDING
     },
     include: { requester: { select: { id: true, name: true, role: true, organizationName: true } } }
@@ -51,7 +52,7 @@ export async function create(user: Express.User, input: { businessGstin: string;
     actorId: user.id,
     consentRequestId: consent.id,
     action: AuditAction.CONSENT_REQUESTED,
-    metadata: { requestedFields: input.requestedFields }
+    metadata: { requestedFields: input.requestedFields, purpose: input.purpose }
   });
   await createNotification({
     userId: business.userId,

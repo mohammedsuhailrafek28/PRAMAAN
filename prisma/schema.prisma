@@ -186,6 +186,7 @@ model ConsentRequest {
   requesterId     String
   businessId      String
   requestedFields Json
+  purpose         String?
   approvedFields  Json?
   status          ConsentStatus   @default(PENDING)
   durationDays    Int?

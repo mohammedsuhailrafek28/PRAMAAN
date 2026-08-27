@@ -9,7 +9,8 @@ const router = Router();
 
 const createSchema = z.object({
   businessGstin: z.string().trim().toUpperCase(),
-  requestedFields: z.array(z.string()).min(1)
+  requestedFields: z.array(z.string()).min(1),
+  purpose: z.enum(["Business Loan", "Vendor Onboarding", "Procurement", "Custom"]).optional()
 });
 const listQuery = z.object({ scope: z.enum(["incoming", "outgoing"]) });
 const params = z.object({ id: z.string().min(1) });
