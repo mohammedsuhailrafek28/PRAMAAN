@@ -13,7 +13,7 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { MsmeDashboard } from "@/pages/msme/MsmeDashboard";
 import { BusinessVerificationPage } from "@/pages/msme/BusinessVerificationPage";
 import { TrustProfilePage } from "@/pages/msme/TrustProfilePage";
-import { ConsentRequestsPage } from "@/pages/msme/ConsentRequestsPage";
+import { ConsentCenterPage } from "@/pages/msme/ConsentCenterPage";
 import { AuditLogPage } from "@/pages/msme/AuditLogPage";
 import { EvidenceVaultPage } from "@/pages/msme/EvidenceVaultPage";
 
@@ -21,7 +21,6 @@ import { BuyerDashboard } from "@/pages/buyer/BuyerDashboard";
 import { BankDashboard } from "@/pages/bank/BankDashboard";
 import { DynamicTrustViewPage } from "@/pages/shared/DynamicTrustViewPage";
 import { ExternalVerificationPage } from "@/pages/shared/ExternalVerificationPage";
-import { AccessControlPage } from "@/pages/msme/AccessControlPage";
 import { useEffect } from "react";
 import { useAuthStore } from "@/store/authStore";
 
@@ -42,11 +41,11 @@ export default function App() {
               <Route path="/msme/dashboard" element={<MsmeDashboard />} />
               <Route path="/msme/verification" element={<BusinessVerificationPage />} />
               <Route path="/msme/trust-profile" element={<TrustProfilePage />} />
-              <Route path="/msme/consent" element={<ConsentRequestsPage />} />
+              <Route path="/msme/consent" element={<ConsentCenterPage />} />
               <Route path="/msme/consent-requests" element={<Navigate to="/msme/consent" replace />} />
               <Route path="/msme/audit-log" element={<AuditLogPage />} />
               <Route path="/msme/evidence-vault" element={<EvidenceVaultPage />} />
-              <Route path="/msme/access" element={<AccessControlPage />} />
+              <Route path="/msme/access" element={<Navigate to="/msme/consent?tab=links" replace />} />
               <Route path="/msme/settings" element={<SettingsPage />} />
             </Route>
           </Route>
