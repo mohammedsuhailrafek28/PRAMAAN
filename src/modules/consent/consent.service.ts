@@ -72,7 +72,9 @@ export async function approve(userId: string, id: string, input: ApprovalInput) 
   const passport = await prisma.passport.findFirst({ where: { businessId: consent.businessId }, orderBy: { version: "desc" } });
   if (!passport) throw new ApiError(409, "PROFILE_NOT_READY", "Business Trust Profile has not been generated yet.");
   const approvedAt = new Date(); const expiresAt = new Date(approvedAt.getTime() + input.durationDays * 86400000);
-  const updated = await prisma.consentRequest.update({ where: { id }, data: { status: ConsentStatus.APPROVED, approvedFields: approvedFields as Prisma.InputJsonValue, approvedEvidenceTypes: approvedEvidenceTypes as Prisma.InputJsonValue, approvedPassportId: passport.id, durationDays: input.durationDays, approvedAt, expiresAt } });
+  const updatedResult = await prisma.consentRequest.updateMany({ where: { id, status: ConsentStatus.PENDING }, data: { status: ConsentStatus.APPROVED, approvedFields: approvedFields as Prisma.InputJsonValue, approvedEvidenceTypes: approvedEvidenceTypes as Prisma.InputJsonValue, approvedPassportId: passport.id, durationDays: input.durationDays, approvedAt, expiresAt } });
+  if (!updatedResult.count) throw new ApiError(409, "CONFLICT", "Only pending requests can be approved.");
+  const updated = await prisma.consentRequest.findUniqueOrThrow({ where: { id }, include: { requester: true, business: true } });
   await writeAuditLog({ businessId: consent.businessId, actorId: userId, consentRequestId: id, action: AuditAction.CONSENT_APPROVED, metadata: { approvedFields, approvedEvidenceTypes, durationDays: input.durationDays, expiresAt } });
   await createNotification({ userId: consent.requesterId, relatedConsentId: id, message: `${consent.business.legalName} granted access to its Business Trust Profile.` });
   return publicConsent(updated);
@@ -80,14 +82,18 @@ export async function approve(userId: string, id: string, input: ApprovalInput) 
 
 export async function reject(userId: string, id: string) {
   const consent = await requireOwnedConsent(userId, id); if (consent.status !== ConsentStatus.PENDING) throw new ApiError(409, "CONFLICT", "Only pending requests can be rejected.");
-  const updated = await prisma.consentRequest.update({ where: { id }, data: { status: ConsentStatus.REJECTED } });
+  const updatedResult = await prisma.consentRequest.updateMany({ where: { id, status: ConsentStatus.PENDING }, data: { status: ConsentStatus.REJECTED } });
+  if (!updatedResult.count) throw new ApiError(409, "CONFLICT", "Only pending requests can be rejected.");
+  const updated = await prisma.consentRequest.findUniqueOrThrow({ where: { id }, include: { requester: true, business: true } });
   await writeAuditLog({ businessId: consent.businessId, actorId: userId, consentRequestId: id, action: AuditAction.CONSENT_REJECTED });
   await createNotification({ userId: consent.requesterId, relatedConsentId: id, message: `${consent.business.legalName} declined your Business Trust Profile request.` }); return publicConsent(updated);
 }
 
 export async function revoke(userId: string, id: string) {
   const consent = await requireOwnedConsent(userId, id); if (consent.status !== ConsentStatus.APPROVED) throw new ApiError(409, "CONFLICT", "Only active approved consent can be revoked.");
-  const updated = await prisma.consentRequest.update({ where: { id }, data: { status: ConsentStatus.REVOKED, revokedAt: new Date() } });
+  const updatedResult = await prisma.consentRequest.updateMany({ where: { id, status: ConsentStatus.APPROVED }, data: { status: ConsentStatus.REVOKED, revokedAt: new Date() } });
+  if (!updatedResult.count) throw new ApiError(409, "CONFLICT", "Only active approved consent can be revoked.");
+  const updated = await prisma.consentRequest.findUniqueOrThrow({ where: { id }, include: { requester: true, business: true } });
   await writeAuditLog({ businessId: consent.businessId, actorId: userId, consentRequestId: id, action: AuditAction.CONSENT_REVOKED });
   await createNotification({ userId: consent.requesterId, relatedConsentId: id, message: `${consent.business.legalName} revoked Business Trust Profile access.` }); return publicConsent(updated);
 }

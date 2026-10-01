@@ -96,7 +96,9 @@ export async function revoke(userId: string, id: string) {
   const grant = await prisma.accessGrant.findUnique({ where: { id } });
   if (!grant || grant.businessId !== business.id) throw new ApiError(404, "NOT_FOUND", "Access grant not found.");
   if (grant.revokedAt) return toPublicGrant(grant);
-  const updated = await prisma.accessGrant.update({ where: { id }, data: { status: AccessGrantStatus.REVOKED, revokedAt: new Date() } });
+  const updatedResult = await prisma.accessGrant.updateMany({ where: { id, status: AccessGrantStatus.ACTIVE, revokedAt: null }, data: { status: AccessGrantStatus.REVOKED, revokedAt: new Date() } });
+  if (!updatedResult.count) throw new ApiError(409, "CONFLICT", "Only active access grants can be revoked.");
+  const updated = await prisma.accessGrant.findUniqueOrThrow({ where: { id } });
   await writeAuditLog({ businessId: business.id, actorId: userId, accessGrantId: id, action: AuditAction.GUEST_LINK_REVOKED, metadata: { revokedAt: updated.revokedAt?.toISOString() } });
   return toPublicGrant(updated);
 }
