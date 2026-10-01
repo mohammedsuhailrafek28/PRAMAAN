@@ -1,7 +1,6 @@
-// Core domain types for Pramaan — India's consent-based business trust
-// infrastructure for MSMEs. These mirror the shape the real backend will
-// eventually return, so the services layer can be swapped without touching
-// the UI or these type definitions.
+// Core domain types for Pramaan — consent-controlled, reusable business trust
+// for Indian MSMEs. The services layer (src/services/api.ts) maps backend
+// responses into these shapes; pages never read raw API payloads.
 
 export type Role = "msme" | "buyer" | "bank";
 
@@ -14,17 +13,22 @@ export interface User {
   avatarInitials: string;
 }
 
-export type VerificationStatus = "unverified" | "pending" | "verified" | "flagged";
 export type EvidenceStatus = "SELF_DECLARED" | "DOCUMENT_SUBMITTED" | "CROSS_CHECKED" | "SOURCE_VERIFIED" | "REJECTED" | "EXPIRED";
 export type EvidenceLifecycleState = "CURRENT" | "EXPIRING_SOON" | "EXPIRED" | "CONFLICT" | "NEEDS_ATTENTION";
 
 export type DocumentType = "gst_certificate" | "udyam_certificate" | "bank_statement";
 
+export interface EvidenceLifecycle {
+  state: EvidenceLifecycleState;
+  freshnessState: "CURRENT" | "EXPIRING_SOON" | "EXPIRED";
+  conflict: boolean;
+  needsAttention: boolean;
+}
+
 export interface BusinessDocument {
+  id: string;
   type: DocumentType;
   label: string;
-  uploaded: boolean;
-  verified: boolean;
   fileName?: string;
   uploadedAt?: string;
   evidenceStatus?: EvidenceStatus;
@@ -37,15 +41,16 @@ export interface BusinessDocument {
   revision?: number;
   isCurrent?: boolean;
   previousVersionId?: string;
-  lifecycle?: { state: EvidenceLifecycleState; freshnessState: "CURRENT" | "EXPIRING_SOON" | "EXPIRED"; conflict: boolean; needsAttention: boolean };
+  lifecycle?: EvidenceLifecycle;
 }
 
-export type TurnoverBand =
-  | "Under ₹40 Lakh"
-  | "₹40 Lakh – ₹1.5 Cr"
-  | "₹1.5 Cr – ₹5 Cr"
-  | "₹5 Cr – ₹25 Cr"
-  | "Above ₹25 Cr";
+export const TURNOVER_BANDS = [
+  "Under ₹40 Lakh",
+  "₹40 Lakh – ₹1.5 Cr",
+  "₹1.5 Cr – ₹5 Cr",
+  "₹5 Cr – ₹25 Cr",
+  "Above ₹25 Cr",
+] as const;
 
 export interface Business {
   id: string;
@@ -55,31 +60,52 @@ export interface Business {
   udyamNumber: string;
   pan: string;
   address: string;
-  turnoverBand: TurnoverBand;
-  inviteCode: string;
-  verificationStatus: VerificationStatus;
+  /** Stored exactly as the backend holds it; may be a value outside TURNOVER_BANDS. */
+  turnoverBand: string;
   trustStatus: EvidenceStatus;
   trustSummary?: TrustSummary;
   sourceVerificationPerformed: false;
-  fieldVerification: {
-    gstin: boolean;
-    udyamNumber: boolean;
-    pan: boolean;
-  };
   documents: BusinessDocument[];
-  verifiedAt?: string;
+  /** Timestamp of the most recent internal cross-check. */
+  lastCrossCheckedAt?: string;
 }
 
-export interface TrustProfile {
-  id: string;
-  businessId: string;
-  businessName?: string;
-  version: number;
-  generatedAt: string;
-  complianceStatus: "Internally cross-checked" | "Review needed";
-  bankVerificationStatus: string;
-  summary: TrustSummary;
-  sourceVerificationPerformed: false;
+export interface TrustCheck {
+  type: string;
+  result: "PASSED" | "FAILED" | "WARNING" | "NOT_APPLICABLE" | string;
+  reason: string;
+}
+
+/** Field-level result from the internal cross-check engine. */
+export interface FieldCheck {
+  field: string;
+  value: unknown;
+  status: EvidenceStatus;
+  confidence: number;
+  reason: string;
+  checks: TrustCheck[];
+}
+
+/** Document-level result from the internal cross-check engine. */
+export interface DocumentCheck {
+  documentId: string;
+  documentType: string;
+  status: EvidenceStatus;
+  confidence: number;
+  reason: string;
+  checks: TrustCheck[];
+}
+
+export interface EvidenceGap {
+  field: string;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | string;
+  message: string;
+}
+
+export interface Contradiction {
+  field: string;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | string;
+  reason: string;
 }
 
 export interface TrustSummary {
@@ -88,6 +114,34 @@ export interface TrustSummary {
   evidenceStrength: number;
   consistency: number;
   freshness: number;
+}
+
+/** The result of POST /business/cross-check, exactly as the engine reported it. */
+export interface CrossCheckResult {
+  trustStatus: EvidenceStatus;
+  checkedAt: string;
+  summary: TrustSummary;
+  fields: FieldCheck[];
+  documents: DocumentCheck[];
+  gaps: EvidenceGap[];
+  contradictions: Contradiction[];
+  limitations: string[];
+}
+
+/** A versioned Trust Profile snapshot (backend: Passport table). */
+export interface TrustProfile {
+  id: string;
+  businessId: string;
+  version: number;
+  generatedAt: string;
+  lastCalculatedAt?: string;
+  summary: TrustSummary;
+  fields: FieldCheck[];
+  documents: DocumentCheck[];
+  gaps: EvidenceGap[];
+  contradictions: Contradiction[];
+  limitations: string[];
+  sourceVerificationPerformed: false;
 }
 
 /** The set of fields a stakeholder can request / be granted consent for. */
@@ -100,14 +154,20 @@ export type ConsentField =
   | "turnoverBand"
   | "bankVerificationStatus";
 
+/**
+ * Labels describe what the backend actually discloses for each key today.
+ * `complianceStatus` -> backend `summary` (trust readiness metrics) and
+ * `bankVerificationStatus` -> backend `documentConfidence` (check results for
+ * every document). Pending the canonical disclosure contract (D3).
+ */
 export const CONSENT_FIELD_LABELS: Record<ConsentField, string> = {
-  legalName: "Legal Business Name",
+  legalName: "Legal business name",
   gstin: "GSTIN",
-  udyamNumber: "Udyam Number",
-  address: "Registered Address",
-  complianceStatus: "Compliance Status",
-  turnoverBand: "Turnover Band",
-  bankVerificationStatus: "Bank Verification Status",
+  udyamNumber: "Udyam number",
+  address: "Registered address",
+  complianceStatus: "Trust readiness summary",
+  turnoverBand: "Turnover band",
+  bankVerificationStatus: "Evidence check results (all documents)",
 };
 
 export type ConsentDurationHours = 24 | 168 | 720; // 24h / 7d / 30d
@@ -123,55 +183,42 @@ export type ConsentStatus = "pending" | "active" | "rejected" | "revoked" | "exp
 export interface ConsentRequest {
   id: string;
   businessId: string;
+  /** Only the identity already returned by GSTIN lookup (name + GSTIN). */
   businessName?: string;
+  businessGstin?: string;
   requesterId: string;
   requesterName: string;
-  requesterRole: Extract<Role, "buyer" | "bank">;
-  purpose?: "Business Loan" | "Vendor Onboarding" | "Procurement" | "Custom";
+  requesterRole?: Extract<Role, "buyer" | "bank">;
+  purpose?: string;
   requestedFields: ConsentField[];
+  /** Requested backend keys the UI does not recognise; never approvable here. */
+  unsupportedRequestedFields: string[];
   approvedFields: ConsentField[];
-  durationHours: ConsentDurationHours | null;
+  durationDays: number | null;
   status: ConsentStatus;
   requestedAt: string;
   approvedAt?: string;
   expiresAt?: string;
   revokedAt?: string;
-  rejectedAt?: string;
 }
 
-export type AuditAction =
-  | "business_verified"
-  | "evidence_uploaded"
-  | "evidence_replaced"
-  | "trust_profile_generated"
-  | "consent_requested"
-  | "consent_approved"
-  | "consent_rejected"
-  | "consent_viewed"
-  | "consent_revoked"
-  | "consent_expired";
+export interface AuditActor {
+  name?: string;
+  organization?: string;
+  role?: Role;
+}
 
-export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
-  business_verified: "Business Verified",
-  evidence_uploaded: "Evidence Uploaded",
-  evidence_replaced: "Evidence Replaced",
-  trust_profile_generated: "Trust Profile Generated",
-  consent_requested: "Requested Access",
-  consent_approved: "Approved Selected Fields",
-  consent_rejected: "Rejected Request",
-  consent_viewed: "Viewed Trust Profile",
-  consent_revoked: "Revoked Access",
-  consent_expired: "Access Expired",
-};
-
+/** One audit row as recorded by the backend. Rendering lives in lib/auditEvents. */
 export interface AuditLogEntry {
   id: string;
-  businessId: string;
+  /** Backend AuditAction value, kept verbatim so unknown events still render. */
+  action: string;
   timestamp: string;
-  actor: string;
-  action: AuditAction;
+  actor?: AuditActor;
+  requester?: AuditActor;
   consentId?: string;
-  details?: string;
+  accessGrantId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface Notification {
@@ -201,24 +248,49 @@ export interface AccessGrant {
   secureUrl?: string;
 }
 
+export interface SharedEvidence {
+  docType: string;
+  evidenceStatus: string;
+  confidence: number;
+  confidenceReason?: string;
+  source?: string;
+  issuedAt?: string;
+  checkedAt?: string;
+  expiresAt?: string;
+  uploadedAt: string;
+  lifecycle?: { state: string; freshnessState: string; conflict: boolean; needsAttention: boolean };
+}
+
+/** A single disclosed field, formatted for display with its check status. */
+export interface SharedField {
+  key: string;
+  label: string;
+  value: string;
+  status?: string;
+  reason?: string;
+  /** For composite values (e.g. per-document check results). */
+  items?: { label: string; status?: string; detail?: string }[];
+}
+
 export interface GuestVerificationView {
   grant: { id: string; purpose: string; recipientName?: string; recipientOrganization?: string; createdAt: string; expiresAt: string };
   business: { legalName?: string; gstin?: string };
-  sharedFields: Record<string, unknown>;
-  evidence: Array<{ docType: ShareableEvidenceType; originalName: string; mimeType: string; evidenceStatus: string; confidence: number; confidenceReason?: string; crossCheckMethod?: string; source?: string; issuedAt?: string; checkedAt?: string; expiresAt?: string; uploadedAt: string; lifecycle: { state: string; freshnessState: string; conflict: boolean; needsAttention: boolean } }>;
+  fields: SharedField[];
+  evidence: SharedEvidence[];
 }
 
-/** Discriminated result returned by the Dynamic Trust View endpoint. */
+/** Discriminated result returned by the Trust View endpoint. */
 export type TrustViewResult =
   | {
       state: "active";
       consentId: string;
       businessName: string;
-      grantedAt: string;
+      grantedAt?: string;
       expiresAt: string;
+      viewedAt?: string;
       purpose?: string;
-      fields: Partial<Record<ConsentField, string>>;
-      evidence?: Array<{ docType: string; evidenceStatus: string; confidence: number; source?: string; issuedAt?: string; expiresAt?: string; uploadedAt: string }>;
+      fields: SharedField[];
+      evidence: SharedEvidence[];
     }
   | { state: "revoked"; consentId: string }
   | { state: "expired"; consentId: string }

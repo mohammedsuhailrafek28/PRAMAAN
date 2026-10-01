@@ -6,9 +6,17 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Format an ISO date string into a short, readable timestamp. */
-export function formatDateTime(iso: string): string {
+/** Parse an ISO timestamp, returning null for missing or invalid input. */
+export function parseDate(iso?: string | null): Date | null {
+  if (!iso) return null;
   const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Format an ISO date string into a short, readable timestamp ("—" if unknown). */
+export function formatDateTime(iso?: string | null): string {
+  const date = parseDate(iso);
+  if (!date) return "—";
   return date.toLocaleString("en-IN", {
     day: "2-digit",
     month: "short",
@@ -18,9 +26,10 @@ export function formatDateTime(iso: string): string {
   });
 }
 
-/** Format an ISO date string into just the date. */
-export function formatDate(iso: string): string {
-  const date = new Date(iso);
+/** Format an ISO date string into just the date ("—" if unknown). */
+export function formatDate(iso?: string | null): string {
+  const date = parseDate(iso);
+  if (!date) return "—";
   return date.toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "short",
@@ -29,8 +38,10 @@ export function formatDate(iso: string): string {
 }
 
 /** Human-readable relative time, e.g. "3 minutes ago". */
-export function timeAgo(iso: string): string {
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+export function timeAgo(iso?: string | null): string {
+  const date = parseDate(iso);
+  if (!date) return "—";
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
   if (seconds < 60) return "just now";
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
@@ -41,8 +52,10 @@ export function timeAgo(iso: string): string {
 }
 
 /** Human-readable countdown until an ISO timestamp, or "Expired" if past. */
-export function timeUntil(iso: string): string {
-  const ms = new Date(iso).getTime() - Date.now();
+export function timeUntil(iso?: string | null): string {
+  const date = parseDate(iso);
+  if (!date) return "—";
+  const ms = date.getTime() - Date.now();
   if (ms <= 0) return "Expired";
   const minutes = Math.floor(ms / 60000);
   if (minutes < 60) return `${minutes} min left`;
@@ -52,7 +65,14 @@ export function timeUntil(iso: string): string {
   return `${days} day${days === 1 ? "" : "s"} left`;
 }
 
-/** Generate a short mock ID with a prefix, e.g. id("CR") -> "CR-4F82A1". */
-export function id(prefix: string): string {
-  return `${prefix}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+/** "1 day", "7 days", "30 days". */
+export function formatDurationDays(days?: number | null): string {
+  if (!days) return "—";
+  return `${days} day${days === 1 ? "" : "s"}`;
+}
+
+/** Mask a PAN for display: ABCDE1234F -> ABCXXXXF (first 3, last 1). */
+export function maskPan(pan?: string | null): string {
+  if (!pan || pan.length < 5) return "—";
+  return `${pan.slice(0, 3)}XXXX${pan.slice(-1)}`;
 }

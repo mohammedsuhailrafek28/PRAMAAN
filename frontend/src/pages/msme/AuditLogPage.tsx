@@ -14,9 +14,9 @@ export function AuditLogPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-slate-900">Audit Log</h2>
+        <h2 className="text-xl font-semibold text-slate-900">Activity</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          A complete, timestamped record of every verification and consent event on your account.
+          A timestamped record of evidence changes, cross-checks, and every access request, approval, view, expiry, and revocation on your business.
         </p>
       </div>
 

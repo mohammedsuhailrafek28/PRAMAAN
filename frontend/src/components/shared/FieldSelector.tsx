@@ -6,16 +6,17 @@ const ALL_FIELDS = Object.keys(CONSENT_FIELD_LABELS) as ConsentField[];
 
 interface FieldSelectorProps {
   selected: ConsentField[];
+  /** Fields offered for selection; defaults to every consent field. */
+  options?: ConsentField[];
   requestedFields?: ConsentField[];
   onChange: (fields: ConsentField[]) => void;
 }
 
 /**
- * Lets the MSME pick exactly which verified fields to share on a consent
- * request. Fields the stakeholder originally asked for are pre-checked and
- * flagged "Requested" — everything else is off by default (data minimization).
+ * Checkbox list of consent fields. Verifiers choose what to request; MSMEs
+ * approve from `options`, which is limited to what was actually requested.
  */
-export function FieldSelector({ selected, requestedFields = [], onChange }: FieldSelectorProps) {
+export function FieldSelector({ selected, options = ALL_FIELDS, requestedFields = [], onChange }: FieldSelectorProps) {
   function toggle(field: ConsentField) {
     if (selected.includes(field)) onChange(selected.filter((f) => f !== field));
     else onChange([...selected, field]);
@@ -23,7 +24,7 @@ export function FieldSelector({ selected, requestedFields = [], onChange }: Fiel
 
   return (
     <div className="space-y-1">
-      {ALL_FIELDS.map((field) => (
+      {options.map((field) => (
         <label
           key={field}
           className={cn(

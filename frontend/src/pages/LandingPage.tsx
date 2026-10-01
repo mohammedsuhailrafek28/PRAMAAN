@@ -48,7 +48,7 @@ function NoiseLayer() {
   );
 }
 
-function TrustPassportVisual({ revoked = false, compact = false }: { revoked?: boolean; compact?: boolean }) {
+function TrustCardVisual({ revoked = false, compact = false }: { revoked?: boolean; compact?: boolean }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 26, rotateX: 12 }}
@@ -73,35 +73,22 @@ function TrustPassportVisual({ revoked = false, compact = false }: { revoked?: b
           <div>
             <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.28em] text-cyan-200/80">
               <ShieldCheck className="h-4 w-4" />
-              Business Trust Profile
+              Trust Card
             </div>
             <h3 className="mt-4 max-w-sm text-2xl font-semibold tracking-tight text-white sm:text-3xl">
               Sharma Textiles Pvt. Ltd.
             </h3>
-            <p className="mt-2 text-sm text-slate-300">Verified MSME digital passport</p>
+            <p className="mt-2 text-sm text-slate-300">Evidence-backed, consent-controlled Trust Card</p>
           </div>
 
-          <div className="grid h-20 w-20 shrink-0 grid-cols-5 gap-1 rounded-2xl border border-white/10 bg-white/10 p-2">
-            {Array.from({ length: 25 }).map((_, index) => (
-              <span
-                key={index}
-                className={cn(
-                  "rounded-[3px]",
-                  [0, 1, 2, 5, 10, 12, 14, 18, 20, 22, 23, 24].includes(index)
-                    ? "bg-white"
-                    : "bg-white/20"
-                )}
-              />
-            ))}
-          </div>
         </div>
 
         <div className="mt-8 grid grid-cols-2 gap-3">
           {[
-            ["GSTIN", "27ABCDE1234F1Z5"],
-            ["Udyam", "UDYAM-MH-03-0012345"],
-            ["Compliance", "Compliant"],
-            ["Bank", "Verified"],
+            ["GSTIN", "Cross-checked"],
+            ["Udyam", "Cross-checked"],
+            ["Bank evidence", "Submitted"],
+            ["Freshness", "Current"],
           ].map(([label, value]) => (
             <div key={label} className="rounded-2xl border border-white/10 bg-black/20 p-4">
               <p className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-slate-400">{label}</p>
@@ -244,7 +231,7 @@ function AssemblySequence() {
               {fragment.label}
             </motion.div>
           ))}
-          <TrustPassportVisual />
+          <TrustCardVisual />
         </div>
       </div>
     </section>
@@ -320,8 +307,8 @@ function ConsentSequence() {
             </div>
           </motion.div>
 
-          <TrustPassportVisual compact />
-          <TrustPassportVisual compact revoked />
+          <TrustCardVisual compact />
+          <TrustCardVisual compact revoked />
         </div>
       </div>
     </section>
@@ -383,7 +370,7 @@ export function LandingPage() {
             Pramaan turns business identity into reusable trust.
           </h2>
           <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-slate-300">
-            Verify once. Share only what is needed. Revoke whenever trust should end.
+            Build evidence once. Share only what is needed. Revoke whenever trust should end.
           </p>
         </motion.div>
       </section>
@@ -400,7 +387,7 @@ export function LandingPage() {
         >
           <p className="text-sm font-medium uppercase tracking-[0.32em] text-cyan-200/80">For India's MSME trust layer</p>
           <h2 className="mt-5 text-4xl font-semibold tracking-tight text-white sm:text-6xl">
-            A passport for business trust. Controlled by the business.
+            Reusable business trust. Controlled by the business.
           </h2>
           <div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row">
             <Button size="lg" className="bg-white text-slate-950 hover:bg-cyan-100" onClick={() => navigate("/register?role=msme")}>
@@ -414,14 +401,14 @@ export function LandingPage() {
               onClick={() => navigate("/register?role=buyer")}
             >
               <Landmark className="h-4 w-4" />
-              Request verification
+              Request MSME information
             </Button>
           </div>
         </motion.div>
       </section>
 
       <footer className="border-t border-white/10 px-6 py-8 text-center text-xs text-slate-500">
-        Pramaan frontend MVP. Representative data only. No lending, scoring, marketplace, blockchain, or AI.
+        Pramaan demo. Representative data only. Pramaan cross-checks submitted evidence internally and does not query GST, Udyam, or bank systems. No lending, credit scoring, blockchain, or AI.
       </footer>
     </div>
   );

@@ -7,14 +7,16 @@ import type {
   ConsentDurationHours,
   ConsentField,
   ConsentRequest,
+  CrossCheckResult,
   Notification,
-  Role,
   TrustProfile,
 } from "@/types";
 
 interface AppState {
   business: Business | null;
   trustProfile: TrustProfile | null;
+  /** Result of the most recent cross-check run in this session (null until one runs). */
+  crossCheckResult: CrossCheckResult | null;
   consentRequests: ConsentRequest[];
   auditLogs: AuditLogEntry[];
   notifications: Notification[];
@@ -24,24 +26,16 @@ interface AppState {
   loadBusiness: () => Promise<void>;
   saveBusinessProfile: (input: Parameters<typeof api.saveBusinessProfile>[0]) => Promise<void>;
   uploadBusinessDocument: (docType: Business["documents"][number]["type"], file: File, metadata?: { issuedAt?: string; expiresAt?: string; source?: string }) => Promise<void>;
-  crossCheckBusiness: () => Promise<void>;
+  crossCheckBusiness: () => Promise<CrossCheckResult>;
   generateTrustProfile: () => Promise<void>;
 
   loadConsentRequests: () => Promise<void>;
-  createConsentRequest: (input: {
-    lookup: string;
-    requesterId: string;
-    requesterName: string;
-    requesterRole: Extract<Role, "buyer" | "bank">;
-    purpose?: ConsentRequest["purpose"];
-    requestedFields: ConsentField[];
-  }) => Promise<ConsentRequest>;
   approveConsentRequest: (id: string, fields: ConsentField[], duration: ConsentDurationHours) => Promise<void>;
   rejectConsentRequest: (id: string) => Promise<void>;
   revokeConsentRequest: (id: string) => Promise<void>;
 
   loadAuditLogs: () => Promise<void>;
-  loadNotifications: (userId: string) => Promise<void>;
+  loadNotifications: () => Promise<void>;
   markNotificationRead: (id: string) => Promise<void>;
   clearError: () => void;
 }
@@ -49,6 +43,7 @@ interface AppState {
 export const useAppStore = create<AppState>((set, get) => ({
   business: null,
   trustProfile: null,
+  crossCheckResult: null,
   consentRequests: [],
   auditLogs: [],
   notifications: [],
@@ -67,7 +62,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   saveBusinessProfile: async (input) => {
     set({ error: null });
-    try { set({ business: await api.saveBusinessProfile(input) }); }
+    // Saving claims resets the backend cross-check status, so any earlier result is no longer current.
+    try { set({ business: await api.saveBusinessProfile(input), crossCheckResult: null }); }
     catch (error) { set({ error: api.getApiError(error) }); throw error; }
   },
 
@@ -79,25 +75,28 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   crossCheckBusiness: async () => {
     set({ loading: true, error: null });
-    try { set({ business: await api.crossCheckBusiness(), loading: false }); await get().loadAuditLogs(); }
-    catch (error) { set({ loading: false, error: api.getApiError(error) }); throw error; }
+    try {
+      const { business, result } = await api.crossCheckBusiness();
+      set({ business, crossCheckResult: result, loading: false });
+      await get().loadAuditLogs();
+      return result;
+    } catch (error) { set({ loading: false, error: api.getApiError(error) }); throw error; }
   },
 
   generateTrustProfile: async () => {
     set({ loading: true, error: null });
-    try { const trustProfile = await api.generateTrustProfile(); set({ trustProfile, loading: false }); await get().loadAuditLogs(); }
-    catch (error) { set({ loading: false, error: api.getApiError(error) }); throw error; }
+    try {
+      const trustProfile = await api.generateTrustProfile();
+      // Generation re-runs the cross-check server-side; refresh business state to match.
+      const business = await api.getBusiness();
+      set({ trustProfile, business, loading: false });
+      await get().loadAuditLogs();
+    } catch (error) { set({ loading: false, error: api.getApiError(error) }); throw error; }
   },
 
   loadConsentRequests: async () => {
     try { set({ consentRequests: await api.getIncomingRequests(), error: null }); }
     catch (error) { set({ error: api.getApiError(error) }); }
-  },
-
-  createConsentRequest: async (input) => {
-    const request = await api.createConsentRequest(input);
-    set({ consentRequests: await api.getOutgoingRequests(input.requesterId) });
-    return request;
   },
 
   approveConsentRequest: async (id, fields, duration) => {
@@ -123,8 +122,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     catch (error) { set({ error: api.getApiError(error) }); }
   },
 
-  loadNotifications: async (userId) => {
-    try { set({ notifications: await api.getNotifications(userId), error: null }); }
+  loadNotifications: async () => {
+    try { set({ notifications: await api.getNotifications(), error: null }); }
     catch (error) { set({ error: api.getApiError(error) }); }
   },
 

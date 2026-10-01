@@ -18,7 +18,8 @@ import { FieldSelector } from "@/components/shared/FieldSelector";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useAppStore } from "@/store/appStore";
 import { useToast } from "@/components/ui/use-toast";
-import { getApiError } from "@/services/api";
+import { consentFieldBackendKey, getApiError } from "@/services/api";
+import { IMPLIED_EVIDENCE_BY_BACKEND_FIELD, backendFieldLabel, documentTypeLabel } from "@/lib/fieldLabels";
 import {
   CONSENT_DURATION_LABELS,
   type ConsentDurationHours,
@@ -40,6 +41,11 @@ export function ConsentRequestsPage() {
   useEffect(() => {
     loadConsentRequests();
   }, [loadConsentRequests]);
+
+  const impliedEvidence = useMemo(
+    () => [...new Set(selectedFields.map((field) => IMPLIED_EVIDENCE_BY_BACKEND_FIELD[consentFieldBackendKey(field)]).filter(Boolean))].map(documentTypeLabel),
+    [selectedFields]
+  );
 
   const pending = useMemo(() => consentRequests.filter((r) => r.status === "pending"), [consentRequests]);
   const active = useMemo(() => consentRequests.filter((r) => r.status === "active"), [consentRequests]);
@@ -77,7 +83,7 @@ export function ConsentRequestsPage() {
   async function handleRevoke(request: ConsentRequest) {
     try {
       await revokeConsentRequest(request.id);
-      toast({ title: "Consent revoked", description: `${request.requesterName} no longer has access to your Verification Profile.`, variant: "warning" });
+      toast({ title: "Consent revoked", description: `${request.requesterName} no longer has access to your Trust Profile.`, variant: "warning" });
     } catch (e) {
       toast({ title: "Revocation failed", description: getApiError(e), variant: "destructive" });
     }
@@ -88,7 +94,7 @@ export function ConsentRequestsPage() {
       <div>
         <h2 className="text-xl font-semibold text-slate-900">Consent Requests</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Review who wants access to your Verification Profile and decide exactly what they can see.
+          Review who wants access to your Trust Profile, why, and decide exactly what they can see and for how long.
         </p>
       </div>
 
@@ -135,13 +141,29 @@ export function ConsentRequestsPage() {
             </DialogDescription>
           </DialogHeader>
 
+          <div className="rounded-md bg-surface px-3 py-2 text-xs text-slate-600">
+            <span className="font-medium">Purpose:</span> {approving?.purpose || "Not stated"}
+          </div>
+
           <div>
             <Label className="mb-2 block">Fields to share</Label>
+            <p className="mb-2 text-xs text-muted-foreground">Only fields {approving?.requesterName} requested can be approved. Untick anything you don't want to share.</p>
             <FieldSelector
               selected={selectedFields}
+              options={approving?.requestedFields}
               requestedFields={approving?.requestedFields}
               onChange={setSelectedFields}
             />
+            {approving && approving.unsupportedRequestedFields.length > 0 && (
+              <p className="mt-2 text-xs text-warning-foreground">
+                Not shareable and will not be approved: {approving.unsupportedRequestedFields.map(backendFieldLabel).join(", ")}
+              </p>
+            )}
+            {impliedEvidence.length > 0 && (
+              <p className="mt-2 rounded-md border border-border px-3 py-2 text-xs text-slate-600">
+                These fields also share details of your current {impliedEvidence.join(", ")} (type, file name, check status, dates, source). Document files are never shared.
+              </p>
+            )}
           </div>
 
           <div>

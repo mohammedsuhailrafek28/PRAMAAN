@@ -8,7 +8,7 @@ interface EmptyStateProps {
   action?: ReactNode;
 }
 
-/** Reused empty-state block (no passport yet, no requests yet, no logs yet…). */
+/** Reused empty-state block (no Trust Profile yet, no requests yet, no activity yet…). */
 export function EmptyState({ icon: Icon, title, description, action }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-white px-6 py-14 text-center">

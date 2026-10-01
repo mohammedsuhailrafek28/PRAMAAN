@@ -4,22 +4,11 @@ import { Bell, LogOut } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { RoleSwitcher } from "@/components/layout/RoleSwitcher";
+import { MobileNav } from "@/components/layout/MobileNav";
+import { pageTitle } from "@/components/layout/navigation";
 import { useAuthStore } from "@/store/authStore";
 import { useAppStore } from "@/store/appStore";
 import { timeAgo, cn } from "@/lib/utils";
-
-const PAGE_TITLES: Record<string, string> = {
-  "/msme/dashboard": "Dashboard",
-  "/msme/verification": "Business Verification",
-  "/msme/trust-profile": "Verification Profile",
-  "/msme/consent-requests": "Consent Requests",
-  "/msme/audit-log": "Audit Log",
-  "/msme/settings": "Settings",
-  "/buyer/dashboard": "Buyer Dashboard",
-  "/buyer/settings": "Settings",
-  "/bank/dashboard": "Bank / NBFC Dashboard",
-  "/bank/settings": "Settings",
-};
 
 export function Topbar() {
   const { currentUser, logout } = useAuthStore();
@@ -29,22 +18,27 @@ export function Topbar() {
   const [bellOpen, setBellOpen] = useState(false);
 
   useEffect(() => {
-    if (currentUser) loadNotifications(currentUser.id);
+    if (currentUser) loadNotifications();
   }, [currentUser, loadNotifications]);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
-  const title = PAGE_TITLES[location.pathname] ?? "Pramaan";
+  const title = pageTitle(location.pathname);
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-border bg-white px-6">
-      <h1 className="text-lg font-semibold text-slate-900">{title}</h1>
+    <header className="flex h-16 items-center justify-between gap-2 border-b border-border bg-white px-3 sm:px-6">
+      <div className="flex min-w-0 items-center gap-2">
+        <MobileNav />
+        <h1 className="truncate text-base font-semibold text-slate-900 sm:text-lg">{title}</h1>
+      </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
         <RoleSwitcher />
 
         <div className="relative">
           <button
             onClick={() => setBellOpen((v) => !v)}
+            aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+            aria-expanded={bellOpen}
             className="relative flex h-9 w-9 items-center justify-center rounded-md border border-border bg-white text-slate-600 hover:bg-surface"
           >
             <Bell className="h-4 w-4" />
@@ -58,7 +52,7 @@ export function Topbar() {
           {bellOpen && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setBellOpen(false)} />
-              <div className="absolute right-0 z-50 mt-2 w-80 rounded-md border border-border bg-white shadow-panel">
+              <div className="absolute right-0 z-50 mt-2 w-80 max-w-[calc(100vw-1.5rem)] rounded-md border border-border bg-white shadow-panel">
                 <div className="border-b border-border px-4 py-2.5 text-sm font-semibold text-slate-800">
                   Notifications
                 </div>
@@ -87,8 +81,8 @@ export function Topbar() {
           )}
         </div>
 
-        <div className="flex items-center gap-2 border-l border-border pl-3">
-          <Avatar>
+        <div className="flex items-center gap-2 border-l border-border pl-2 sm:pl-3">
+          <Avatar className="hidden sm:flex">
             <AvatarFallback>{currentUser?.avatarInitials}</AvatarFallback>
           </Avatar>
           <div className="hidden text-sm leading-tight lg:block">
@@ -101,6 +95,7 @@ export function Topbar() {
               navigate("/login");
             }}
             title="Log out"
+            aria-label="Log out"
             className="ml-1 flex h-9 w-9 items-center justify-center rounded-md text-slate-500 hover:bg-surface hover:text-slate-800"
           >
             <LogOut className="h-4 w-4" />

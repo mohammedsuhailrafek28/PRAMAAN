@@ -1,19 +1,16 @@
-import { Building2, Landmark } from "lucide-react";
+import { AlertTriangle, Building2, Landmark } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/shared/StatusPill";
-import {
-  CONSENT_DURATION_LABELS,
-  CONSENT_FIELD_LABELS,
-  type ConsentRequest,
-} from "@/types";
-import { formatDateTime, timeUntil } from "@/lib/utils";
+import { backendFieldLabel } from "@/lib/fieldLabels";
+import { CONSENT_FIELD_LABELS, type ConsentRequest } from "@/types";
+import { formatDateTime, formatDurationDays, timeUntil } from "@/lib/utils";
 
-const STATUS_TONE = {
-  pending: { label: "Pending", tone: "pending" as const },
-  active: { label: "Active", tone: "verified" as const },
-  rejected: { label: "Rejected", tone: "danger" as const },
+const CONSENT_STATUS_PILL = {
+  pending: { label: "Awaiting decision", tone: "pending" as const },
+  active: { label: "Access active", tone: "verified" as const },
+  rejected: { label: "Declined", tone: "danger" as const },
   revoked: { label: "Revoked", tone: "danger" as const },
   expired: { label: "Expired", tone: "neutral" as const },
 };
@@ -25,53 +22,73 @@ interface ConsentRequestCardProps {
   onRevoke?: () => void;
 }
 
+function FieldChips({ fields, muted = false }: { fields: string[]; muted?: boolean }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {fields.map((label) => (
+        <span key={label} className={`rounded-full border border-border px-2.5 py-1 text-xs ${muted ? "bg-white text-slate-400 line-through" : "bg-surface text-slate-600"}`}>
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function ConsentRequestCard({ request, onApprove, onReject, onRevoke }: ConsentRequestCardProps) {
   const RoleIcon = request.requesterRole === "bank" ? Landmark : Building2;
-  const status = STATUS_TONE[request.status];
-  const fieldsToShow = request.status === "pending" ? request.requestedFields : request.approvedFields;
+  const status = CONSENT_STATUS_PILL[request.status];
+  const requestedLabels = request.requestedFields.map((field) => CONSENT_FIELD_LABELS[field]);
+  const approvedLabels = request.approvedFields.map((field) => CONSENT_FIELD_LABELS[field]);
+  const notApproved = request.requestedFields.filter((field) => !request.approvedFields.includes(field)).map((field) => CONSENT_FIELD_LABELS[field]);
+  const decided = request.status !== "pending" && request.status !== "rejected";
 
   return (
     <Card>
       <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
           <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary-50 text-primary-700">
-              <RoleIcon className="h-5 w-5" />
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary-50 text-primary-700">
+              <RoleIcon className="h-5 w-5" aria-hidden />
             </div>
             <div>
               <p className="text-sm font-semibold text-slate-900">{request.requesterName}</p>
-              <p className="text-xs text-muted-foreground capitalize">
-                {request.requesterRole === "bank" ? "Bank / NBFC" : "Buyer"} · Requested{" "}
-                {formatDateTime(request.requestedAt)}
+              <p className="text-xs text-muted-foreground">
+                {request.requesterRole === "bank" ? "Bank / NBFC" : request.requesterRole === "buyer" ? "Buyer" : "Verifier"} · Requested {formatDateTime(request.requestedAt)}
               </p>
-              {request.purpose && <p className="mt-1 text-xs font-medium text-slate-600">Purpose: {request.purpose}</p>}
+              <p className="mt-1 text-xs font-medium text-slate-600">Purpose: {request.purpose || "Not stated"}</p>
             </div>
           </div>
           <StatusPill label={status.label} tone={status.tone} />
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-1.5">
-          {fieldsToShow.map((f) => (
-            <span
-              key={f}
-              className="rounded-full border border-border bg-surface px-2.5 py-1 text-xs text-slate-600"
-            >
-              {CONSENT_FIELD_LABELS[f]}
-            </span>
-          ))}
+        <div className="mt-4 space-y-2">
+          {decided ? (
+            <>
+              <p className="text-xs font-medium text-slate-600">Approved ({approvedLabels.length} of {requestedLabels.length} requested)</p>
+              <FieldChips fields={approvedLabels} />
+              {notApproved.length > 0 && <FieldChips fields={notApproved} muted />}
+            </>
+          ) : (
+            <>
+              <p className="text-xs font-medium text-slate-600">Requested fields</p>
+              <FieldChips fields={requestedLabels} />
+            </>
+          )}
+          {request.unsupportedRequestedFields.length > 0 && (
+            <p className="flex items-start gap-1.5 text-xs text-warning-foreground">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              Also requested, but not shareable from this screen: {request.unsupportedRequestedFields.map(backendFieldLabel).join(", ")}
+            </p>
+          )}
         </div>
 
-        <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
+        <div className="mt-4 flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs text-muted-foreground">
-            {request.status === "pending" && "Awaiting your decision"}
-            {request.status === "active" && request.expiresAt && (
-              <>
-                {CONSENT_DURATION_LABELS[request.durationHours!]} · {timeUntil(request.expiresAt)}
-              </>
-            )}
-            {request.status === "rejected" && `Rejected ${formatDateTime(request.rejectedAt!)}`}
-            {request.status === "revoked" && `Revoked ${formatDateTime(request.revokedAt!)}`}
-            {request.status === "expired" && request.expiresAt && `Expired ${formatDateTime(request.expiresAt)}`}
+            {request.status === "pending" && "Nothing is shared until you approve."}
+            {request.status === "active" && `${formatDurationDays(request.durationDays)} access · expires ${formatDateTime(request.expiresAt)} (${timeUntil(request.expiresAt)})`}
+            {request.status === "rejected" && "You declined this request. Nothing was shared."}
+            {request.status === "revoked" && `Revoked ${formatDateTime(request.revokedAt)}`}
+            {request.status === "expired" && `Expired ${formatDateTime(request.expiresAt)}`}
           </div>
 
           <div className="flex gap-2">
@@ -81,7 +98,7 @@ export function ConsentRequestCard({ request, onApprove, onReject, onRevoke }: C
                   Reject
                 </Button>
                 <Button size="sm" onClick={onApprove}>
-                  Approve
+                  Review &amp; approve
                 </Button>
               </>
             )}
