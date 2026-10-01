@@ -57,7 +57,7 @@ export function AccessControlPage() {
   const activeRegistered = registered.filter((request) => request.status === "active");
 
   return <div className="space-y-6">
-    <div><h2 className="text-xl font-semibold text-slate-900">Share via secure link</h2><p className="mt-1 text-sm text-muted-foreground">Create a time-limited link for someone who doesn't have a Pramaan account. It uses the same sharing choices as consent requests.</p></div>
+    <div><h1 className="text-2xl font-semibold tracking-tight text-slate-900">Share via secure link</h1><p className="mt-1 text-sm text-muted-foreground">Create a time-limited link for someone who doesn't have a Pramaan account. It uses the same sharing choices as consent requests.</p></div>
     <Card><CardHeader><CardTitle className="text-base">Create secure link</CardTitle></CardHeader><CardContent className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-3">
         <div><Label htmlFor="g-name">Recipient name</Label><Input id="g-name" value={recipientName} onChange={(e) => setRecipientName(e.target.value)} placeholder="Optional" /></div>

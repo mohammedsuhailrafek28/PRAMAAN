@@ -1,22 +1,25 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
 interface EmptyStateProps {
   icon: LucideIcon;
   title: string;
-  description: string;
+  description: ReactNode;
   action?: ReactNode;
+  /** Compact variant for use inside cards. */
+  compact?: boolean;
 }
 
-/** Reused empty-state block (no Trust Profile yet, no requests yet, no activity yet…). */
-export function EmptyState({ icon: Icon, title, description, action }: EmptyStateProps) {
+/** Intentional empty state: says what will appear here and how to get it there. */
+export function EmptyState({ icon: Icon, title, description, action, compact = false }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-white px-6 py-14 text-center">
-      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-surface">
-        <Icon className="h-5 w-5 text-muted-foreground" />
+    <div className={cn("flex flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-center", compact ? "px-4 py-8" : "px-6 py-14")}>
+      <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-slate-100">
+        <Icon className="h-5 w-5 text-slate-500" aria-hidden />
       </div>
-      <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
-      <p className="mt-1 max-w-sm text-sm text-muted-foreground">{description}</p>
+      <p className="text-sm font-semibold text-slate-900">{title}</p>
+      <p className="mt-1 max-w-sm text-sm text-slate-600">{description}</p>
       {action && <div className="mt-4">{action}</div>}
     </div>
   );

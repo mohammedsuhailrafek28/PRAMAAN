@@ -90,7 +90,7 @@ export function DynamicTrustViewPage() {
     <div className="mx-auto max-w-2xl space-y-5">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
         <div className="min-w-0">
-          <h2 className="break-words text-xl font-semibold text-slate-900">{result.businessName}</h2>
+          <h1 className="break-words text-2xl font-semibold tracking-tight text-slate-900">{result.businessName}</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">Purpose: {result.purpose || "Not stated"}</p>
           {result.profileVersion !== undefined && (
             <p className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-2.5 py-1 text-xs font-medium text-slate-600">

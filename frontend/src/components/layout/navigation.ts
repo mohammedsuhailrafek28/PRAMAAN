@@ -2,10 +2,9 @@ import {
   Archive,
   Building2,
   History,
-  Inbox,
+  KeyRound,
   Layers,
   LayoutDashboard,
-  Link2,
   Search,
   Settings,
   type LucideIcon,
@@ -13,49 +12,62 @@ import {
 
 import type { Role } from "@/types";
 
+/** Every MSME/verifier route in one place, so links can't drift from the router. */
+export const ROUTES = {
+  dashboard: "/msme/dashboard",
+  businessProfile: "/msme/verification",
+  evidence: "/msme/evidence-vault",
+  trustProfile: "/msme/trust-profile",
+  consent: "/msme/consent",
+  secureLinks: "/msme/consent?tab=links",
+  readiness: "/msme/readiness",
+  reports: "/msme/reports",
+  activity: "/msme/audit-log",
+  msmeSettings: "/msme/settings",
+} as const;
+
 export interface NavItem {
   to: string;
   label: string;
   icon: LucideIcon;
 }
 
-export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
+export interface NavSection {
+  label?: string;
+  items: NavItem[];
+}
+
+export const NAV_BY_ROLE: Record<Role, NavSection[]> = {
   msme: [
-    { to: "/msme/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { to: "/msme/verification", label: "Business Profile", icon: Building2 },
-    { to: "/msme/evidence-vault", label: "Evidence", icon: Archive },
-    { to: "/msme/trust-profile", label: "Trust Profile", icon: Layers },
-    { to: "/msme/consent-requests", label: "Requests", icon: Inbox },
-    { to: "/msme/access", label: "Access", icon: Link2 },
-    { to: "/msme/audit-log", label: "Activity", icon: History },
-    { to: "/msme/settings", label: "Settings", icon: Settings },
+    { items: [{ to: ROUTES.dashboard, label: "Dashboard", icon: LayoutDashboard }] },
+    {
+      label: "Trust",
+      items: [
+        { to: ROUTES.businessProfile, label: "Business Profile", icon: Building2 },
+        { to: ROUTES.evidence, label: "Evidence", icon: Archive },
+        { to: ROUTES.trustProfile, label: "Trust Profile", icon: Layers },
+      ],
+    },
+    {
+      label: "Sharing",
+      items: [
+        { to: ROUTES.consent, label: "Consent & Access", icon: KeyRound },
+        { to: ROUTES.activity, label: "Activity", icon: History },
+      ],
+    },
+    { label: "Account", items: [{ to: ROUTES.msmeSettings, label: "Settings", icon: Settings }] },
   ],
   buyer: [
-    { to: "/buyer/dashboard", label: "Verification Workspace", icon: Search },
-    { to: "/buyer/settings", label: "Settings", icon: Settings },
+    { items: [{ to: "/buyer/dashboard", label: "Verification Workspace", icon: Search }] },
+    { label: "Account", items: [{ to: "/buyer/settings", label: "Settings", icon: Settings }] },
   ],
   bank: [
-    { to: "/bank/dashboard", label: "Verification Workspace", icon: Search },
-    { to: "/bank/settings", label: "Settings", icon: Settings },
+    { items: [{ to: "/bank/dashboard", label: "Verification Workspace", icon: Search }] },
+    { label: "Account", items: [{ to: "/bank/settings", label: "Settings", icon: Settings }] },
   ],
 };
 
-const PAGE_TITLES: Record<string, string> = {
-  "/msme/dashboard": "Dashboard",
-  "/msme/verification": "Business Profile",
-  "/msme/evidence-vault": "Evidence Vault",
-  "/msme/trust-profile": "Trust Profile",
-  "/msme/consent-requests": "Consent Requests",
-  "/msme/access": "Access",
-  "/msme/audit-log": "Activity",
-  "/msme/settings": "Settings",
-  "/buyer/dashboard": "Verification Workspace",
-  "/buyer/settings": "Settings",
-  "/bank/dashboard": "Verification Workspace",
-  "/bank/settings": "Settings",
-};
-
-export function pageTitle(pathname: string): string {
-  if (pathname.startsWith("/trust-view/")) return "Trust View";
-  return PAGE_TITLES[pathname] ?? "Pramaan";
+/** Short context shown in the top bar (pages render their own h1). */
+export function workspaceLabel(role: Role): string {
+  return role === "msme" ? "MSME workspace" : role === "bank" ? "Lender workspace" : "Buyer workspace";
 }

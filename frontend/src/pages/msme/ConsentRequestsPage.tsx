@@ -98,7 +98,7 @@ export function ConsentRequestsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-slate-900">Consent Requests</h2>
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Consent Requests</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Review who wants access, why, and decide exactly what they can see and for how long.
         </p>

@@ -76,3 +76,8 @@ export function maskPan(pan?: string | null): string {
   if (!pan || pan.length < 5) return "—";
   return `${pan.slice(0, 3)}XXXX${pan.slice(-1)}`;
 }
+
+/** "Acme Retail Buyers'" / "Kisan NBFC's". */
+export function possessive(name: string): string {
+  return name.endsWith("s") ? `${name}'` : `${name}'s`;
+}

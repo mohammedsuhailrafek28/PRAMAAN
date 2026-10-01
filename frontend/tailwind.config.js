@@ -67,6 +67,27 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // Semantic status palette. One meaning per colour:
+        // positive = current / cross-checked / active, info = in progress,
+        // warning = stale / expiring, negative = conflict / missing / revoked / expired.
+        positive: {
+          DEFAULT: "#059669",
+          bg: "#ecfdf5",
+          border: "#a7f3d0",
+          foreground: "#065f46",
+        },
+        negative: {
+          DEFAULT: "#dc2626",
+          bg: "#fef2f2",
+          border: "#fecaca",
+          foreground: "#991b1b",
+        },
+        info: {
+          DEFAULT: "#2541d6",
+          bg: "#eef3ff",
+          border: "#c1d1ff",
+          foreground: "#182c8c",
+        },
         verified: {
           DEFAULT: "#059669",
           bg: "#ecfdf5",
@@ -93,6 +114,7 @@ export default {
         subtle: "0 1px 2px 0 rgb(15 23 42 / 0.04)",
         card: "0 1px 3px 0 rgb(15 23 42 / 0.06), 0 1px 2px -1px rgb(15 23 42 / 0.06)",
         panel: "0 4px 16px -4px rgb(15 23 42 / 0.08), 0 2px 6px -2px rgb(15 23 42 / 0.06)",
+        raised: "0 12px 32px -12px rgb(15 23 42 / 0.18), 0 2px 6px -2px rgb(15 23 42 / 0.06)",
       },
       keyframes: {
         "accordion-down": {
@@ -103,10 +125,15 @@ export default {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        shimmer: {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.55" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        shimmer: "shimmer 1.6s ease-in-out infinite",
       },
     },
   },

@@ -59,7 +59,7 @@ export function EvidenceVaultPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-slate-900">Evidence Vault</h2>
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Evidence Vault</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">Keep the evidence behind your business profile current and ready for a verification workflow.</p>
       </div>
 

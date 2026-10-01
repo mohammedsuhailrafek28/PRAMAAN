@@ -42,7 +42,8 @@ export default function App() {
               <Route path="/msme/dashboard" element={<MsmeDashboard />} />
               <Route path="/msme/verification" element={<BusinessVerificationPage />} />
               <Route path="/msme/trust-profile" element={<TrustProfilePage />} />
-              <Route path="/msme/consent-requests" element={<ConsentRequestsPage />} />
+              <Route path="/msme/consent" element={<ConsentRequestsPage />} />
+              <Route path="/msme/consent-requests" element={<Navigate to="/msme/consent" replace />} />
               <Route path="/msme/audit-log" element={<AuditLogPage />} />
               <Route path="/msme/evidence-vault" element={<EvidenceVaultPage />} />
               <Route path="/msme/access" element={<AccessControlPage />} />

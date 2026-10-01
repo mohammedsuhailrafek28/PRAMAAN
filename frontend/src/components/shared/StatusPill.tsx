@@ -1,31 +1,43 @@
-import { CheckCircle2, Clock, XCircle, AlertTriangle, MinusCircle, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Circle, Clock, MinusCircle, XCircle, type LucideIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import type { StatusTone } from "@/lib/trustVocabulary";
 
-type Tone = "verified" | "pending" | "warning" | "danger" | "neutral" | "default";
+/** Older call sites used these names; they map onto the semantic tones. */
+type LegacyTone = "verified" | "pending" | "danger" | "default";
 
-const TONE_MAP: Record<Tone, { variant: "verified" | "warning" | "destructive" | "neutral" | "secondary"; icon: LucideIcon }> = {
-  verified: { variant: "verified", icon: CheckCircle2 },
-  pending: { variant: "warning", icon: Clock },
-  warning: { variant: "warning", icon: AlertTriangle },
-  danger: { variant: "destructive", icon: XCircle },
-  neutral: { variant: "neutral", icon: MinusCircle },
-  default: { variant: "neutral", icon: Clock },
-};
+const LEGACY: Record<LegacyTone, StatusTone> = { verified: "positive", pending: "neutral", danger: "negative", default: "neutral" };
+
+export type StatusIcon = "check" | "clock" | "alert" | "x" | "ban" | "minus" | "dot";
+
+const ICONS: Record<StatusIcon, LucideIcon> = { check: CheckCircle2, clock: Clock, alert: AlertTriangle, x: XCircle, ban: Ban, minus: MinusCircle, dot: Circle };
+const DEFAULT_ICON: Record<StatusTone, StatusIcon> = { positive: "check", info: "clock", neutral: "minus", warning: "alert", negative: "x" };
 
 interface StatusPillProps {
   label: string;
-  tone: Tone;
+  tone: StatusTone | LegacyTone;
   /** Longer explanation, exposed as a tooltip and to assistive technology. */
   description?: string;
+  icon?: StatusIcon;
+  className?: string;
 }
 
-/** Small status indicator reused for evidence, consent, and account states. */
-export function StatusPill({ label, tone, description }: StatusPillProps) {
-  const { variant, icon: Icon } = TONE_MAP[tone];
+/**
+ * The only status badge in the product. Colour carries one meaning
+ * (see lib/trustVocabulary): never use it to decorate.
+ */
+export function StatusPill({ label, tone, description, icon, className }: StatusPillProps) {
+  const semantic = (tone in LEGACY ? LEGACY[tone as LegacyTone] : tone) as StatusTone;
+  const Icon = ICONS[icon ?? DEFAULT_ICON[semantic]];
   return (
-    <Badge variant={variant} title={description} aria-label={description ? `${label}. ${description}` : undefined}>
-      <Icon className="h-3 w-3" aria-hidden />
+    <Badge
+      variant={semantic}
+      title={description}
+      aria-label={description ? `${label}. ${description}` : undefined}
+      className={cn("whitespace-nowrap", className)}
+    >
+      <Icon className="h-3 w-3 shrink-0" aria-hidden />
       {label}
     </Badge>
   );

@@ -76,3 +76,19 @@ export function withheldScope(requested: DisclosureScope, approved: DisclosureSc
     evidence: requested.evidence.filter((key) => !approved.evidence.includes(key)),
   };
 }
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** "3 fields", "1 evidence item", "3 fields and 1 evidence item". */
+export function scopeCountPhrase(scope: DisclosureScope): string {
+  const parts = [scope.fields.length ? plural(scope.fields.length, "field", "fields") : "", scope.evidence.length ? plural(scope.evidence.length, "evidence item", "evidence items") : ""].filter(Boolean);
+  return parts.length ? parts.join(" and ") : "nothing";
+}
+
+/** "GSTIN and GST certificate evidence", "Legal business name, GSTIN and 2 more". */
+export function scopeLabelPhrase(scope: DisclosureScope, max = 3): string {
+  const labels = [...scope.fields, ...scope.evidence].map((key) => disclosureItem(key)?.label ?? key);
+  if (labels.length === 0) return "nothing";
+  if (labels.length <= max) return labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+  return `${labels.slice(0, max).join(", ")} and ${labels.length - max} more`;
+}

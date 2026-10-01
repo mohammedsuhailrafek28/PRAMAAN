@@ -1,14 +1,32 @@
 import { StatusPill } from "@/components/shared/StatusPill";
-import { describeEvidenceStatus, describeLifecycle } from "@/lib/trustVocabulary";
+import { describeConsent, describeEvidenceStatus, describeLifecycle, describeLink, type StatusDescriptor } from "@/lib/trustVocabulary";
+import type { ConsentStatus } from "@/types";
 
-/** Evidence/claim check status in Pramaan's honest vocabulary (missing when absent). */
+function Descriptor({ d }: { d: StatusDescriptor }) {
+  return <StatusPill label={d.label} tone={d.tone} description={d.description} icon={d.icon} />;
+}
+
+/** Claim/evidence check status in Pramaan's honest vocabulary ("Missing" when absent). */
 export function EvidenceStatusBadge({ status }: { status?: string | null }) {
-  const { label, tone, description } = describeEvidenceStatus(status);
-  return <StatusPill label={label} tone={tone} description={description} />;
+  return <Descriptor d={describeEvidenceStatus(status)} />;
 }
 
 /** Freshness/lifecycle of a stored evidence version. */
 export function LifecycleBadge({ state }: { state?: string | null }) {
-  const { label, tone, description } = describeLifecycle(state);
-  return <StatusPill label={label} tone={tone} description={description} />;
+  return <Descriptor d={describeLifecycle(state)} />;
+}
+
+/** Registered-verifier consent state. */
+export function ConsentStatusBadge({ status }: { status: ConsentStatus }) {
+  return <Descriptor d={describeConsent(status)} />;
+}
+
+/** Secure (guest) link state. */
+export function LinkStatusBadge({ status }: { status: "ACTIVE" | "EXPIRED" | "REVOKED" }) {
+  return <Descriptor d={describeLink(status)} />;
+}
+
+/** Any precomputed descriptor (e.g. field freshness). */
+export function DescriptorBadge({ descriptor }: { descriptor: StatusDescriptor }) {
+  return <Descriptor d={descriptor} />;
 }

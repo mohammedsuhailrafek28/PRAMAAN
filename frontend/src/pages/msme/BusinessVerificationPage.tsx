@@ -154,7 +154,7 @@ export function BusinessVerificationPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-slate-900">Business Profile</h2>
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Business Profile</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
           Submit your business claims and supporting evidence. Pramaan runs a deterministic internal cross-check; it does not query government or banking systems.
         </p>

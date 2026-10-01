@@ -6,49 +6,64 @@ import { cn } from "@/lib/utils";
 
 export function Brand() {
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary-700 text-sm font-bold text-white" aria-hidden>
+    <div className="flex items-center gap-2.5">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-800 text-sm font-bold text-white shadow-subtle" aria-hidden>
         P
       </div>
-      <span className="text-base font-semibold tracking-tight text-slate-900">Pramaan</span>
+      <div className="leading-tight">
+        <span className="block text-[15px] font-semibold tracking-tight text-slate-900">Pramaan</span>
+        <span className="block text-[11px] text-slate-500">Consent-based business trust</span>
+      </div>
     </div>
   );
 }
 
-/** Role-specific navigation links, shared by the desktop sidebar and the mobile drawer. */
+/** Role-specific navigation, shared by the desktop sidebar and the mobile drawer. */
 export function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const { currentUser } = useAuthStore();
-  const items = currentUser ? NAV_BY_ROLE[currentUser.role] : [];
+  const sections = currentUser ? NAV_BY_ROLE[currentUser.role] : [];
 
   return (
-    <nav aria-label="Main" className="flex-1 space-y-0.5 px-3 py-4">
-      {items.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          onClick={onNavigate}
-          className={({ isActive }) =>
-            cn(
-              "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-surface hover:text-slate-900",
-              isActive && "bg-primary-50 text-primary-700 hover:bg-primary-50 hover:text-primary-700"
-            )
-          }
-        >
-          <item.icon className="h-4 w-4" aria-hidden />
-          {item.label}
-        </NavLink>
+    <nav aria-label="Main" className="flex-1 space-y-5 overflow-y-auto px-3 py-5">
+      {sections.map((section, index) => (
+        <div key={section.label ?? index}>
+          {section.label && <p className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">{section.label}</p>}
+          <ul className="space-y-0.5">
+            {section.items.map((item) => (
+              <li key={item.to}>
+                <NavLink
+                  to={item.to}
+                  onClick={onNavigate}
+                  className={({ isActive }) =>
+                    cn(
+                      "relative flex min-h-10 items-center gap-2.5 rounded-md px-3 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      isActive && "bg-primary-50 text-primary-800 hover:bg-primary-50 hover:text-primary-800 before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-primary-700"
+                    )
+                  }
+                >
+                  <item.icon className="h-4 w-4 shrink-0" aria-hidden />
+                  {item.label}
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </div>
       ))}
     </nav>
   );
 }
 
 export function SidebarFooter() {
-  return <div className="border-t border-border p-4 text-xs text-muted-foreground">Pramaan · Demo environment</div>;
+  return (
+    <div className="border-t border-border px-5 py-4 text-[11px] leading-5 text-slate-500">
+      Demo environment · internal cross-checks only, no government systems queried
+    </div>
+  );
 }
 
 export function Sidebar() {
   return (
-    <aside className="hidden w-60 shrink-0 border-r border-border bg-white md:flex md:flex-col">
+    <aside className="hidden w-64 shrink-0 border-r border-border bg-white md:flex md:flex-col">
       <div className="flex h-16 items-center border-b border-border px-5">
         <Brand />
       </div>

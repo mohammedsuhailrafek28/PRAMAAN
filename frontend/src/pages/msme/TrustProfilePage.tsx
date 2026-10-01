@@ -76,7 +76,7 @@ export function TrustProfilePage() {
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
-          <h2 className="text-xl font-semibold text-slate-900">Trust Profile</h2>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Trust Profile</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Your reusable, versioned record of what Pramaan has checked. Share only what is needed, with consent.
           </p>
@@ -86,7 +86,7 @@ export function TrustProfilePage() {
             <RefreshCw className="h-4 w-4" />
             {generating ? "Generating…" : "Generate new version"}
           </Button>
-          <Button onClick={() => navigate("/msme/consent-requests")}>
+          <Button onClick={() => navigate("/msme/consent")}>
             <Inbox className="h-4 w-4" />
             Consent requests
           </Button>

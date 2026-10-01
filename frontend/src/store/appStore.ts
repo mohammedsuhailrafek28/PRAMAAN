@@ -3,6 +3,7 @@ import { create } from "zustand";
 import * as api from "@/services/api";
 import type { DisclosureScope } from "@/lib/disclosure";
 import type {
+  AccessGrant,
   AuditLogEntry,
   Business,
   ConsentDurationHours,
@@ -18,6 +19,8 @@ interface AppState {
   /** Result of the most recent cross-check run in this session (null until one runs). */
   crossCheckResult: CrossCheckResult | null;
   consentRequests: ConsentRequest[];
+  /** Secure (guest) links created by this MSME. */
+  accessGrants: AccessGrant[];
   auditLogs: AuditLogEntry[];
   notifications: Notification[];
   loading: boolean;
@@ -30,6 +33,7 @@ interface AppState {
   generateTrustProfile: () => Promise<void>;
 
   loadConsentRequests: () => Promise<void>;
+  loadAccessGrants: () => Promise<void>;
   approveConsentRequest: (id: string, scope: DisclosureScope, duration: ConsentDurationHours) => Promise<void>;
   rejectConsentRequest: (id: string) => Promise<void>;
   revokeConsentRequest: (id: string) => Promise<void>;
@@ -45,6 +49,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   trustProfile: null,
   crossCheckResult: null,
   consentRequests: [],
+  accessGrants: [],
   auditLogs: [],
   notifications: [],
   loading: false,
@@ -96,6 +101,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   loadConsentRequests: async () => {
     try { set({ consentRequests: await api.getIncomingRequests(), error: null }); }
+    catch (error) { set({ error: api.getApiError(error) }); }
+  },
+
+  loadAccessGrants: async () => {
+    try { set({ accessGrants: await api.getAccessGrants() }); }
     catch (error) { set({ error: api.getApiError(error) }); }
   },
 
