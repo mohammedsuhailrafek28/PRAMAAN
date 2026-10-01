@@ -30,3 +30,18 @@ export function LinkStatusBadge({ status }: { status: "ACTIVE" | "EXPIRED" | "RE
 export function DescriptorBadge({ descriptor }: { descriptor: StatusDescriptor }) {
   return <Descriptor d={descriptor} />;
 }
+
+/**
+ * Check status plus freshness for one evidence item, without repeating the
+ * same label twice (e.g. an expired document is "Stale" on both axes).
+ */
+export function EvidenceBadges({ status, lifecycle }: { status?: string | null; lifecycle?: string | null }) {
+  const check = describeEvidenceStatus(status);
+  const fresh = lifecycle ? describeLifecycle(lifecycle) : undefined;
+  return (
+    <span className="flex flex-wrap gap-1.5">
+      <Descriptor d={check} />
+      {fresh && fresh.label !== check.label && <Descriptor d={fresh} />}
+    </span>
+  );
+}
