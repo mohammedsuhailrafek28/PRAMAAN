@@ -1,5 +1,6 @@
 import { execFileSync, execSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 
 const root = process.cwd();
@@ -286,6 +287,49 @@ async function main() {
     assert(snapshot.sourceVerificationPerformed === false, "profile claims source verification");
     pass("F. Business Trust Profile generation and owner fetch return evidence-backed snapshot fields");
 
+    const snapshotVerifier = await request("POST", "/api/auth/register", {
+      body: { role: "BUYER", name: "Snapshot Verifier", organizationName: "Snapshot Verification Desk", email: "snapshot-verifier-smoke@pramaan.demo", password: "password123" }
+    });
+    const snapshotVerifierToken = snapshotVerifier.data.token;
+    const v1Version = snapshot.version;
+    const snapshotConsent = await request("POST", "/api/consent-requests", {
+      token: snapshotVerifierToken,
+      body: { businessGstin: businessInput.gstin, requestedFields: ["legalBusinessName", "turnoverBand"], requestedEvidenceTypes: ["GST_CERTIFICATE"], purpose: "Vendor Onboarding" }
+    });
+    const snapshotConsentId = snapshotConsent.data.consentRequestId;
+    await request("PATCH", `/api/consent-requests/${snapshotConsentId}/approve`, {
+      token: msmeToken,
+      body: { approvedFields: ["legalBusinessName", "turnoverBand"], approvedEvidenceTypes: ["GST_CERTIFICATE"], durationDays: 7 }
+    });
+    const beforeV2 = await request("GET", `/api/trust-view/${snapshotConsentId}`, { token: snapshotVerifierToken });
+    assert(beforeV2.data.metadata.passportVersion === v1Version, "consent did not pin passport v1");
+    assert(beforeV2.data.sharedFields.turnoverBand === businessInput.turnoverBand, "v1 Trust View value mismatch");
+    const v1Evidence = beforeV2.data.evidence[0]?.uploadedAt;
+
+    await request("PATCH", "/api/business/me", { token: msmeToken, body: { ...businessInput, turnoverBand: "INR 5Cr-INR 10Cr" } });
+    const v2Gst = await uploadDocument(msmeToken, "GST_CERTIFICATE", replacementFile, { issuedAt: "2026-03-01", expiresAt: "2027-03-01", source: "MSME v2 replacement" });
+    await request("POST", "/api/passport/generate", { token: msmeToken });
+    const passportV2 = await request("GET", "/api/passport/me", { token: msmeToken });
+    assert(passportV2.data.passport.snapshotJson.version > v1Version, "passport v2 was not generated");
+    const afterV2 = await request("GET", `/api/trust-view/${snapshotConsentId}`, { token: snapshotVerifierToken });
+    assert(afterV2.data.metadata.passportVersion === v1Version, "existing consent switched to latest passport");
+    assert(afterV2.data.sharedFields.turnoverBand === businessInput.turnoverBand, "v2-only turnover leaked into v1 consent");
+    assert(afterV2.data.evidence[0]?.uploadedAt === v1Evidence, "v2-only evidence leaked into v1 consent");
+
+    const freshConsent = await request("POST", "/api/consent-requests", {
+      token: snapshotVerifierToken,
+      body: { businessGstin: businessInput.gstin, requestedFields: ["turnoverBand"], requestedEvidenceTypes: ["GST_CERTIFICATE"], purpose: "Vendor Onboarding" }
+    });
+    const freshConsentId = freshConsent.data.consentRequestId;
+    await request("PATCH", `/api/consent-requests/${freshConsentId}/approve`, { token: msmeToken, body: { approvedFields: ["turnoverBand"], approvedEvidenceTypes: ["GST_CERTIFICATE"], durationDays: 7 } });
+    const freshView = await request("GET", `/api/trust-view/${freshConsentId}`, { token: snapshotVerifierToken });
+    assert(freshView.data.metadata.passportVersion === passportV2.data.passport.snapshotJson.version, "new consent did not use v2");
+    assert(freshView.data.sharedFields.turnoverBand === "INR 5Cr-INR 10Cr", "new consent did not expose v2 value");
+    assert(freshView.data.evidence[0]?.id === undefined && freshView.data.evidence[0]?.uploadedAt !== v1Evidence, "new consent did not use v2 evidence");
+    await request("PATCH", `/api/consent-requests/${snapshotConsentId}/revoke`, { token: msmeToken });
+    await request("PATCH", `/api/consent-requests/${freshConsentId}/revoke`, { token: msmeToken });
+    pass("F2. approved consent remains pinned to passport v1 while a new consent uses passport v2 and v2 evidence");
+
     const profileList = await request("GET", "/api/readiness-profiles");
     assert(profileList.data.profiles.length === 4, "readiness profiles missing");
     pass("G. available readiness profiles are listed");
@@ -542,6 +586,25 @@ async function main() {
     );
     assert(!revokedView.data.sharedFields, "revoked response leaked sharedFields");
     pass("X. buyer trust-view after revoke is blocked with CONSENT_REVOKED");
+
+    const expiryConsentCreate = await request("POST", "/api/consent-requests", {
+      token: buyerToken,
+      body: { businessGstin: businessInput.gstin, requestedFields: ["legalBusinessName"], purpose: "Vendor Onboarding" }
+    });
+    const expiryConsentId = expiryConsentCreate.data.consentRequestId;
+    await request("PATCH", `/api/consent-requests/${expiryConsentId}/approve`, { token: msmeToken, body: { approvedFields: ["legalBusinessName"], durationDays: 1 } });
+    const expiryDb = new DatabaseSync(path.join(smokeDbDir, "smoke.db"));
+    expiryDb.prepare('UPDATE "ConsentRequest" SET "expiresAt" = ? WHERE "id" = ?').run(new Date(0).toISOString(), expiryConsentId);
+    expiryDb.close();
+    const expiredOutgoing = await request("GET", "/api/consent-requests?scope=outgoing", { token: buyerToken });
+    assert(expiredOutgoing.data.requests.find((item: Json) => item.id === expiryConsentId)?.status === "EXPIRED", "expired consent was not materialized in outgoing list");
+    const expiredIncoming = await request("GET", "/api/consent-requests?scope=incoming", { token: msmeToken });
+    assert(expiredIncoming.data.requests.find((item: Json) => item.id === expiryConsentId)?.status === "EXPIRED", "expired consent was not materialized in incoming list");
+    await expectBlocked("GET", `/api/trust-view/${expiryConsentId}`, buyerToken, ["CONSENT_EXPIRED"], "expired registered consent");
+    await expectBlocked("GET", `/api/trust-view/${expiryConsentId}`, buyerToken, ["CONSENT_EXPIRED"], "repeated expired registered consent");
+    audit = await request("GET", "/api/audit-logs", { token: msmeToken });
+    assert(getActions(audit.data).filter((action: string) => action === "CONSENT_EXPIRED").length === 1, "repeated expiry reads duplicated CONSENT_EXPIRED audit");
+    pass("X2. registered consent expiry is deterministic, denies Trust View, updates lists, and audits once");
 
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
     const actions = getActions(audit.data);

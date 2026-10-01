@@ -132,7 +132,8 @@ export async function resolveGuest(token: string) {
   const snapshot = grant.business.passports?.find((item) => item.id === grant.passportId)?.snapshotJson;
   if (!snapshot) throw new ApiError(410, "PROFILE_SNAPSHOT_UNAVAILABLE", "The pinned Trust Profile snapshot is unavailable.");
   const fields = filterPassportFields(snapshot, scope.fields);
-  const evidence = grant.business.documents.filter((document) => scope.evidenceTypes.includes(document.docType)).map(safeEvidence);
+  const evidenceRows = grant.business.documents.filter((document) => scope.evidenceTypes.includes(document.docType) && document.uploadedAt <= (grant.business.passports.find((item) => item.id === grant.passportId)?.generatedAt ?? new Date(0)));
+  const evidence = evidenceRows.filter((document, index, rows) => rows.findIndex((candidate) => candidate.docType === document.docType) === index).map(safeEvidence);
   const viewedAt = new Date();
   await prisma.accessGrant.update({ where: { id: grant.id }, data: { lastAccessedAt: viewedAt } });
   await writeAuditLog({ businessId: grant.businessId, actorId: grant.createdByUserId, accessGrantId: grant.id, action: AuditAction.GUEST_LINK_OPENED, dedupeWindowMs: 300000, metadata: { accessType: "guest", viewedAt: viewedAt.toISOString(), fields: Object.keys(fields), evidenceTypes: evidence.map((item) => item.docType) } });

@@ -24,7 +24,8 @@ export async function getTrustView(userId: string, consentRequestId: string) {
   const approvedFields = (consent.approvedFields ?? []) as string[];
   const sharedFields = filterPassportFields(passport.snapshotJson, approvedFields);
   const evidenceTypes = ((consent.approvedEvidenceTypes ?? []) as string[]);
-  const evidence = evidenceTypes.length ? (await prisma.document.findMany({ where: { businessId: consent.businessId, isCurrent: true, docType: { in: evidenceTypes as any } }, orderBy: { uploadedAt: "desc" } })).map(safeEvidence) : [];
+  const evidenceRows = evidenceTypes.length ? await prisma.document.findMany({ where: { businessId: consent.businessId, docType: { in: evidenceTypes as any }, uploadedAt: { lte: passport.generatedAt } }, orderBy: { uploadedAt: "desc" } }) : [];
+  const evidence = evidenceRows.filter((document, index, rows) => rows.findIndex((candidate) => candidate.docType === document.docType) === index).map(safeEvidence);
   await writeAuditLog({ businessId: consent.businessId, actorId: userId, consentRequestId: consent.id, action: AuditAction.TRUST_VIEW_OPENED, dedupeWindowMs: 300000, metadata: { fields: Object.keys(sharedFields), evidenceTypes } });
   return { businessId: consent.businessId, consentId: consent.id, sharedFields, metadata: { accessGrantedAt: consent.approvedAt, expiresAt: consent.expiresAt, purpose: consent.purpose, passportVersion: passport.version }, evidence };
 }
