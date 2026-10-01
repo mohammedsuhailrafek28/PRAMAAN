@@ -208,7 +208,11 @@ Registered Trust View fields are disclosed as `{ value, status, evidenceStatus, 
 
 Field and evidence status values are `SELF_DECLARED`, `DOCUMENT_SUBMITTED`, `CROSS_CHECKED`, `SOURCE_VERIFIED`, `REJECTED`, and `EXPIRED`; `SOURCE_VERIFIED` is reserved for a future source adapter and is not emitted by the current deterministic engine. Field `freshnessState` is `CURRENT` or `EXPIRED` based on the pinned snapshot checks. Evidence `lifecycle.freshnessState` is `CURRENT`, `EXPIRING_SOON`, or `EXPIRED`, and `lifecycle.state` is `CURRENT`, `EXPIRING_SOON`, `EXPIRED`, `CONFLICT`, or `NEEDS_ATTENTION`.
 
+The `summary` disclosure is a calculated Pramaan trust summary, not a business-submitted claim. When disclosed through registered Trust View or a guest link, it is labelled `status: CROSS_CHECKED`, `evidenceStatus: CROSS_CHECKED`, and `source: INTERNAL_DETERMINISTIC_CHECKS`. It is not `SELF_DECLARED`, `MSME_SUBMITTED`, or `SOURCE_VERIFIED`.
+
 The authoritative audit events emitted by the current backend are: `CONSENT_REQUESTED`, `CONSENT_APPROVED`, `CONSENT_REJECTED`, `CONSENT_EXPIRED`, `CONSENT_REVOKED`, `TRUST_VIEW_OPENED`, `GUEST_LINK_CREATED`, `GUEST_LINK_OPENED`, `GUEST_LINK_REVOKED`, `GUEST_LINK_EXPIRED`, `EVIDENCE_UPLOADED`, and `EVIDENCE_REPLACED`. Legacy enum aliases remain in the schema for historical records only and are not emitted by the consent/guest/evidence paths.
+
+Report generation intentionally refreshes a deterministic Trust Profile snapshot before composing the report, so the report records the current business/evidence state and its exact `trustProfileId`. This may increment the Trust Profile version. It cannot alter existing registered consents or guest links because those grants retain `approvedPassportId`/`passportId` and resolve the pinned snapshot; the release smoke and reliability journeys verify this behavior.
 
 | Commit | Agent | Summary |
 |---|---|---|

@@ -10,6 +10,17 @@ export function filterPassportFields(snapshot: Prisma.JsonValue, fields: string[
   return fields.reduce<Record<string, unknown>>((acc, field) => {
     if (allowedPassportFields.includes(field) && field in source) {
       const raw = source[field];
+      if (field === "summary") {
+        acc[field] = {
+          value: raw && typeof raw === "object" && "value" in raw ? (raw as Record<string, unknown>).value : raw,
+          status: "CROSS_CHECKED",
+          evidenceStatus: "CROSS_CHECKED",
+          source: "INTERNAL_DETERMINISTIC_CHECKS",
+          lastCheckedAt: source.lastCalculatedAt,
+          freshnessState: "CURRENT"
+        };
+        return acc;
+      }
       if (raw && typeof raw === "object" && "value" in raw) {
         const record = raw as Record<string, unknown>;
         const checks = Array.isArray(record.checks) ? record.checks : [];

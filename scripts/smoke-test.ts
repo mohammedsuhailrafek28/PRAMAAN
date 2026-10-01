@@ -178,6 +178,12 @@ function getActions(audit: Json) {
   return audit.logs.map((logEntry: Json) => logEntry.action);
 }
 
+function containsKey(value: unknown, key: string): boolean {
+  if (Array.isArray(value)) return value.some((item) => containsKey(item, key));
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value as Record<string, unknown>).some(([entryKey, entryValue]) => entryKey === key || containsKey(entryValue, key));
+}
+
 async function main() {
   process.on("exit", killServer);
   process.on("SIGINT", () => {
@@ -497,7 +503,7 @@ async function main() {
     const outgoing = await request("GET", "/api/consent-requests?scope=outgoing", { token: buyerToken });
     const outgoingRequest = outgoing.data.requests.find((item: Json) => item.id === consentId);
     assert(outgoingRequest && outgoingRequest.business && Object.keys(outgoingRequest.business).sort().join(",") === "gstin,id,legalName", "outgoing consent leaks private business fields");
-    for (const forbidden of ["pan", "address", "turnoverBand", "documents", "user", "userId"]) assert(!JSON.stringify(outgoingRequest).includes(forbidden), `pending consent leaked ${forbidden}`);
+    for (const forbidden of ["pan", "address", "turnoverBand", "documents", "user", "userId"]) assert(!containsKey(outgoingRequest, forbidden), `pending consent leaked ${forbidden}`);
     await request("POST", "/api/consent-requests", { token: buyerToken, body: { businessGstin: businessInput.gstin, requestedFields: ["pan"] }, expected: [400] });
     pass("R1. pending consent responses are redacted and unsafe disclosure keys are rejected");
     let msmeNotifications = await request("GET", "/api/notifications", { token: msmeToken });
@@ -540,6 +546,10 @@ async function main() {
     assert(trustView.data.sharedFields.gstin.evidenceStatus === "CROSS_CHECKED", "approved field status missing");
     assert(trustView.data.sharedFields.gstin.source === "INTERNAL_DETERMINISTIC_CHECKS", "field source semantics missing");
     assert(trustView.data.sharedFields.gstin.lastCheckedAt, "field freshness timestamp missing");
+    assert(trustView.data.sharedFields.summary.value && typeof trustView.data.sharedFields.summary.value === "object" && typeof trustView.data.sharedFields.summary.value.trustReadiness === "number", "calculated summary missing");
+    assert(trustView.data.sharedFields.summary.evidenceStatus === "CROSS_CHECKED", "summary was labelled with the wrong status");
+    assert(trustView.data.sharedFields.summary.source === "INTERNAL_DETERMINISTIC_CHECKS", "summary provenance missing");
+    assert(!["SELF_DECLARED", "DOCUMENT_SUBMITTED", "SOURCE_VERIFIED"].includes(trustView.data.sharedFields.summary.evidenceStatus), "summary provenance was mislabelled");
     assert(trustView.data.evidence.every((item: Json) => item.lifecycle?.freshnessState), "registered evidence freshness metadata missing");
     for (const forbidden of [
       "documents",
@@ -659,7 +669,7 @@ async function main() {
         recipientName: "Procurement reviewer",
         recipientOrganization: "External Verification Desk",
         purpose: "Vendor onboarding",
-        scope: { fields: ["legalBusinessName", "gstin"], evidenceTypes: ["GST_CERTIFICATE", "UDYAM_CERTIFICATE"] },
+        scope: { fields: ["legalBusinessName", "gstin", "summary"], evidenceTypes: ["GST_CERTIFICATE", "UDYAM_CERTIFICATE"] },
         durationHours: 24
       }
     });
@@ -669,7 +679,8 @@ async function main() {
     assert(!JSON.stringify(guestGrant.data).includes("tokenHash"), "token hash leaked at creation");
     const guestView = await request("GET", `/api/public/verify/${guestToken}`);
     assert(guestView.data.grant.purpose === "Vendor onboarding", "guest purpose missing");
-    assert(Object.keys(guestView.data.sharedFields).sort().join(",") === "gstin,legalBusinessName", "guest field scope leaked or missing");
+    assert(Object.keys(guestView.data.sharedFields).sort().join(",") === "gstin,legalBusinessName,summary", "guest field scope leaked or missing");
+    assert(guestView.data.sharedFields.summary.source === "INTERNAL_DETERMINISTIC_CHECKS" && guestView.data.sharedFields.summary.evidenceStatus === "CROSS_CHECKED", "guest summary provenance missing");
     assert(guestView.data.evidence.length === 2, "guest evidence scope missing");
     assert(!JSON.stringify(guestView.data).includes("filePath"), "guest file path leaked");
     const limitedGrant = await request("POST", "/api/access-grants", { token: msmeToken, body: { purpose: "Other", scope: { fields: ["gstin"] }, durationHours: 24 } });
