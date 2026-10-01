@@ -229,3 +229,35 @@ Consent approvals pin `approvedPassportId` to the exact passport snapshot used f
 **Nice-to-have API additions (P1, not blocking):** `rejectedAt` on consent requests (history currently shows "declined" without a time); a `GET` for the latest cross-check result so field-level results survive a page reload; `GET /audit-logs` for verifiers (their own requests/views).
 
 **Still incomplete or potentially misleading in the UI:** readiness and report features have no screens; Evidence Vault has no per-type "missing" slots and no way to open your own file; the verifier has no audit view; the Access (guest-link) page still uses its own field vocabulary until the catalogue lands.
+
+## 16. Frontend contract alignment (Claude)
+
+**Commit:** `c38260a`, aligned to Codex's `a834f0c` and `bbbd73c`. This supersedes the "blocked on the disclosure contract" list in §15.
+
+**Validation.** `npm run check` (contract sync, `tsc -b`, eslint `--max-warnings 0`, `vite build`) passes. A headless golden journey passed **55/55** against `bbbd73c` in an isolated worktree, using a fresh database built from its migrations and seed. It covered:
+- FIELD-only, EVIDENCE-only and mixed requests (payloads verified against the API)
+- partial approval, plus an unrequested item that can't be offered in the UI and is rejected by the API (HTTP 400)
+- GSTIN approval without the GST certificate, and an explicit GST certificate approval (metadata only, no file name or MIME type)
+- "Shared from Trust Profile vN" surviving a newer version
+- evidence pinned across a later replacement
+- expiry, revocation, invalid-link and guest-link states with no raw backend strings
+- a guest-link selector identical to the consent vocabulary
+- canonical Activity events
+- cross-check, Trust Profile and mobile layout
+
+Expiry was simulated by backdating `expiresAt` in the scratch database.
+
+**Frontend contract guard.** `frontend/src/lib/disclosure.ts` mirrors `src/utils/disclosureCatalogue.ts`. `npm run check:contract` parses both and fails if keys, labels or kinds differ. **Codex: if you change the catalogue, run `cd frontend && npm run check:contract`; a failure means the UI needs a matching update.** Field descriptions are frontend-only copy.
+
+**Discrepancies between docs and implementation (implementation treated as authoritative; nothing compensated in the frontend):**
+1. **Trust View and guest fields carry no check status.** `filterPassportFields` now unwraps the snapshot's `{ value, evidenceStatus, confidenceReason }` to the bare value. Verifiers can no longer see whether GSTIN was cross-checked or only self-declared, which golden-flow step 7 asks for. Request: return `{ value, evidenceStatus, confidenceReason }` per disclosed field (the UI already renders a status badge when present).
+2. **Guest-link evidence differs from Trust View evidence.** Trust View picks the latest version uploaded at or before the pinned snapshot, current or not. Guest links filter `business.documents`, which only includes `isCurrent: true`. So a document replaced after a guest link is created disappears from that link, while a registered consent keeps showing the pinned version.
+3. **Guest links don't expose the pinned Trust Profile version.** The guest response has no `passportVersion`, so "Shared from Trust Profile vN" is only possible for registered consent. Request: add `passportVersion` to `resolveGuest`'s response.
+4. **Lifecycle differs.** Guest evidence includes `lifecycle` (freshness); Trust View evidence does not, so verifiers see no "Stale" or "Expiring soon" badge.
+5. **No canonical audit event list in §14.** The frontend registry was keyed to the actions the code emits (`grep AuditAction.` in `src/modules`). Legacy names (`REJECTED`, `EXPIRED`, `DOCUMENT_SUBMITTED`, `ACCESS_GRANT_*`, …) are no longer mapped; they render with a humanized fallback.
+6. GSTIN lookup no longer returns `address`. That's fine; the UI no longer displays it.
+
+**Behaviour the UI relies on:**
+- `metadata.passportVersion` on Trust View.
+- Error codes `CONSENT_REVOKED`, `CONSENT_EXPIRED`, `PROFILE_NOT_READY`, `ACCESS_REVOKED`, `ACCESS_EXPIRED`, `INVALID_ACCESS_LINK`, `PROFILE_SNAPSHOT_UNAVAILABLE`, `CONFLICT`.
+- `CONSENT_EXPIRED` and `GUEST_LINK_EXPIRED` are shown as "Pramaan (automatic)"; `GUEST_LINK_OPENED` as "Link recipient".
