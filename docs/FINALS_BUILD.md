@@ -267,3 +267,42 @@ Expiry was simulated by backdating `expiresAt` in the scratch database.
 - `metadata.passportVersion` on Trust View.
 - Error codes `CONSENT_REVOKED`, `CONSENT_EXPIRED`, `PROFILE_NOT_READY`, `ACCESS_REVOKED`, `ACCESS_EXPIRED`, `INVALID_ACCESS_LINK`, `PROFILE_SNAPSHOT_UNAVAILABLE`, `CONFLICT`.
 - `CONSENT_EXPIRED` and `GUEST_LINK_EXPIRED` are shown as "Pramaan (automatic)"; `GUEST_LINK_OPENED` as "Link recipient".
+
+## 17. Phase 2 demo recovery and release runbook
+
+### Normal start
+
+```powershell
+npm install
+npm run prisma:generate
+npm run db:init
+npm run db:seed
+npm run build
+npm start
+```
+
+Backend: `http://localhost:4000`. Health: `http://localhost:4000/api/health`. Interactive API docs: `http://localhost:4000/api/docs`.
+
+### Reset demo
+
+Run `npm run demo:reset`. This recreates the tracked SQLite schema and deterministic Sharma Textiles scenario. It is safe to run repeatedly. Demo credentials are `msme@pramaan.demo`, `buyer@pramaan.demo`, and `bank@pramaan.demo`; all use `password123`.
+
+### Verify database
+
+Run `npm run db:status`. It must report `Database schema is up to date!`. For a full release check, run `npm run build`, `npm test`, `npm run smoke`, and `npm run reliability`.
+
+### Restart frontend/backend
+
+Backend: stop the existing process with `Ctrl+C`, then run `npm start`. Frontend: from `frontend/`, run `npm install` once and `npm run dev`; use the URL printed by Vite, normally `http://localhost:5173`.
+
+### Golden journey
+
+Log in as the MSME, confirm the seeded Trust Profile and evidence, log in as the buyer, open the pending request, approve only selected fields as the MSME, open the buyer Trust View, create and open a guest link, then verify revoke and expiry states. The automated equivalent is `npm run reliability`.
+
+### Recovery if the database becomes inconsistent
+
+Stop the backend, run `npm run demo:reset`, confirm `npm run db:status`, and restart the backend. Do not delete migrations or edit `dev.db` manually. If reset itself fails, preserve the error output and return to the last known safe commit below before retrying.
+
+### Last known safe commit
+
+Phase 2 reliability checkpoint: `5be69e6c8e63ad7defc6d74c6621857dc417c196` (Phase 1.5 contract parity). The current Phase 2 changes should only be promoted after `npm run reliability` and the full validation suite pass.

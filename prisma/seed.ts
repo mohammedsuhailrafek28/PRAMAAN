@@ -39,7 +39,7 @@ async function main() {
   ] });
   await prisma.business.update({ where: { id: business.id }, data: { verificationStatus: VerificationStatus.VERIFIED, trustStatus: EvidenceStatus.CROSS_CHECKED } });
   await generate(msme.id);
-  const pending = await prisma.consentRequest.create({ data: { requesterId: buyer.id, businessId: business.id, requestedFields: ["legalBusinessName", "gstin", "udyamNumber"] as Prisma.InputJsonValue, requestedEvidenceTypes: [] as Prisma.InputJsonValue, purpose: "Vendor Onboarding", status: "PENDING" } });
+  const pending = await prisma.consentRequest.create({ data: { requesterId: buyer.id, businessId: business.id, requestedFields: ["legalBusinessName", "gstin", "udyamNumber"] as Prisma.InputJsonValue, requestedEvidenceTypes: [] as Prisma.InputJsonValue, purpose: "Vendor onboarding", status: "PENDING" } });
   await prisma.auditLog.create({ data: { businessId: business.id, actorId: buyer.id, consentRequestId: pending.id, action: AuditAction.CONSENT_REQUESTED, metadata: { seeded: true } } });
   await prisma.notification.create({ data: { userId: msme.id, relatedConsentId: pending.id, message: "Acme Retail Buyers wants to view your Business Trust Profile." } });
   console.table([{ role: "MSME", email: msme.email, password }, { role: "BUYER", email: buyer.email, password }, { role: "BANK", email: bank.email, password }]);
