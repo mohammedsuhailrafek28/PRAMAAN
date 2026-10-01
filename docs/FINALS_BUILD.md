@@ -306,3 +306,48 @@ Stop the backend, run `npm run demo:reset`, confirm `npm run db:status`, and res
 ### Last known safe commit
 
 Phase 2 reliability checkpoint: `5be69e6c8e63ad7defc6d74c6621857dc417c196` (Phase 1.5 contract parity). The current Phase 2 changes should only be promoted after `npm run reliability` and the full validation suite pass.
+
+## 18. Frontend Phase 2 — product experience (Claude)
+
+**Commits:** `eb5a00e` design system + dashboard · `0278497` Trust Card + Evidence Vault · `ec33a4a` Consent & Access center · `3028346` verifier workspace + case page · `92d615e` Activity, Readiness, Reports · `e65cf7f` accessibility + touch targets. No backend, schema, contract, auth, audit or snapshot semantics were changed.
+
+**Screen map**
+
+| Route | Purpose |
+|---|---|
+| `/msme/dashboard` | Identity, Trust Profile version/freshness, trust readiness, evidence health, access; Action Center (next actions derived from backend state, each deep-linked) |
+| `/msme/verification` | Business Profile claims + internal cross-check results |
+| `/msme/evidence-vault` | Three evidence slots (present/missing, check status, freshness, dates, source, version history, replace); `?upload=<type>` opens the upload dialog |
+| `/msme/trust-profile` | Trust Card + claims table (status, freshness, reason) + evidence behind the version + conflicts/gaps + "What Pramaan does not verify" |
+| `/msme/consent` | Consent & Access: `?tab=requests | active | links | history`. Old `/msme/consent-requests` and `/msme/access` redirect here |
+| `/msme/audit-log` | Activity as plain-language sentences, day headings, category filters |
+| `/msme/readiness` | Backend readiness engine: score, level, blockers, next actions, requirement checklist |
+| `/msme/reports` | Generate / preview (HTML) / download (PDF) / revoke report snapshots |
+| `/buyer|bank/dashboard` | Verification cases list + new request (GSTIN → purpose → canonical scope) |
+| `/trust-view/:id` | Case page: overview + approved scope for every state; shared information / evidence / trust context only when active |
+| `/verify/:token` | Secure-link recipient page (same components and vocabulary as registered consent) |
+
+**Demo click path (≈4 min, fresh `npm run demo:reset`)**
+1. MSME → Dashboard: Action Center shows the seeded request and the stale bank statement.
+2. Click **Replace** → upload `test-fixtures/bank-statement.pdf` (issued 2026-09-01, expiry 2027-08-31) → evidence 3/3 current, history kept.
+3. Trust Profile → **Generate new version** (v2).
+4. Switch to Buyer → **New request** → GSTIN `33ABCDE1234F1Z5` → purpose *Business Loan* (preset includes bank statement evidence) → Send.
+5. Switch to MSME → Consent & Access → **Review & approve** → untick *Turnover band* ("Sharing 5 of 6") → read the "What they will see" preview → Approve.
+6. Switch to Buyer → **Open** the case → shared information with statuses, the replaced bank statement as *Current*, "Shared from Trust Profile v2".
+7. MSME → Active access → **Revoke access** (confirm) → Buyer refresh shows "Access was revoked".
+8. MSME → Secure links → create, open in a private window, revoke → "Access was revoked".
+9. MSME → Activity → the whole story in sentences.
+
+**Validation (all from a freshly seeded scratch DB in an isolated worktree):**
+- **Static checks:** `npm run check` (contract sync, `tsc -b`, eslint `--max-warnings 0`, `vite build`) passes at every commit.
+- **Golden journey:** 50/50 headless checks, run against both `5be69e6` and HEAD `e65cf7f` (which includes Codex's `ce0fceb`, `4ac4f8c`, `94d34f6`). Covered: MSME journey, verifier request/approved case/refresh (exactly one Trust View call per open and per refresh), revoke, expiry (backdated in scratch DB), secure link create/open/revoke/expire, Activity sentences, readiness, report PDF (`%PDF-`), keyboard skip link, and mobile at 390px (no horizontal overflow, no tap targets under 32px, drawer, dialog fits viewport).
+- **Accessibility:** axe-core WCAG 2.0/2.1 A+AA reports 0 violations on 16 screens (all MSME pages, verifier list and case, secure-link page, login, register, landing).
+
+**Backend observations for Codex (not compensated in the frontend beyond display wording):**
+1. `fieldFilter.ts` tags the disclosed **Trust summary** as `status: SELF_DECLARED, source: MSME_SUBMITTED`. It is computed by Pramaan, so the UI shows it without a status badge as "Calculated by Pramaan from internal checks". Suggest a distinct source (e.g. `PRAMAAN_CALCULATED`) and no claim status.
+2. `deriveEvidenceLifecycle().conflict` is `true` for any failed check, including expiry, so expired documents carry `conflict: true` while `state` is `EXPIRED`. The UI keys conflict messaging off `state === "CONFLICT"` only.
+3. The MSME-side consent list (`publicConsent`) and `GET /access-grants` don't expose the pinned Trust Profile version, so Active access can say "pinned at approval" but not "v2". Request: include `approvedPassportVersion` / `profileVersion`.
+4. Generating a report calls passport `generate()` (`report-data-loader.ts`), creating a new Trust Profile version as a side effect. Later approvals pin that version. The Reports page now discloses this; confirm it's intended.
+5. Readiness `evaluate` re-runs `calculateAndPersistBusinessTrustProfile`; the Readiness page discloses this.
+6. Seed purpose is "Vendor onboarding" while the request enum is "Vendor Onboarding"; cosmetic mismatch between seeded and UI-created requests.
+7. Verifiers have no audit endpoint; "Last activity" in the case list is derived from request timestamps only.
