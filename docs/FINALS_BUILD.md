@@ -204,6 +204,12 @@ Consent approvals pin `approvedPassportId` to the exact passport snapshot used f
 
 `NODE_ENV=production` requires an explicit non-default `JWT_SECRET`. Demo seed data is synthetic and deterministic: `npm run demo:reset` creates the three demo credentials above, a verified profile, local fixture paths, a stale bank evidence row, a generated passport, and one pending consent request. No external government verification, LLM, blockchain, lending, marketplace, or scoring service is used.
 
+Registered Trust View fields are disclosed as `{ value, status, evidenceStatus, source, lastCheckedAt, freshnessState }`. `source` is currently `INTERNAL_DETERMINISTIC_CHECKS` for evaluated snapshot fields; it is never external or government verification. Evidence items expose `{ docType, evidenceStatus, confidence, crossCheckMethod, source, issuedAt, checkedAt, expiresAt, uploadedAt, lifecycle }`; filenames, MIME types, paths, and file contents are excluded. Guest responses use the same field/evidence shapes and add `grant.profileVersion`. `lifecycle.freshnessState` is `CURRENT`, `EXPIRING_SOON`, or `EXPIRED`; `lifecycle.state` may additionally be `CONFLICT` or `NEEDS_ATTENTION`.
+
+Field and evidence status values are `SELF_DECLARED`, `DOCUMENT_SUBMITTED`, `CROSS_CHECKED`, `SOURCE_VERIFIED`, `REJECTED`, and `EXPIRED`; `SOURCE_VERIFIED` is reserved for a future source adapter and is not emitted by the current deterministic engine. Field `freshnessState` is `CURRENT` or `EXPIRED` based on the pinned snapshot checks. Evidence `lifecycle.freshnessState` is `CURRENT`, `EXPIRING_SOON`, or `EXPIRED`, and `lifecycle.state` is `CURRENT`, `EXPIRING_SOON`, `EXPIRED`, `CONFLICT`, or `NEEDS_ATTENTION`.
+
+The authoritative audit events emitted by the current backend are: `CONSENT_REQUESTED`, `CONSENT_APPROVED`, `CONSENT_REJECTED`, `CONSENT_EXPIRED`, `CONSENT_REVOKED`, `TRUST_VIEW_OPENED`, `GUEST_LINK_CREATED`, `GUEST_LINK_OPENED`, `GUEST_LINK_REVOKED`, `GUEST_LINK_EXPIRED`, `EVIDENCE_UPLOADED`, and `EVIDENCE_REPLACED`. Legacy enum aliases remain in the schema for historical records only and are not emitted by the consent/guest/evidence paths.
+
 | Commit | Agent | Summary |
 |---|---|---|
 | `8b9c2e7` | — | Baseline at audit time ("Harden Pramaan release candidate") |

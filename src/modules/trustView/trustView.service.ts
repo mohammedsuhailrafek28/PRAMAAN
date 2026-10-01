@@ -2,11 +2,12 @@ import { AuditAction, ConsentStatus } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { ApiError } from "../../utils/apiError.js";
 import { filterPassportFields } from "../../utils/fieldFilter.js";
+import { deriveEvidenceLifecycle } from "../evidence/evidence-lifecycle.service.js";
 import { writeAuditLog } from "../audit/audit.service.js";
 import { expireIfNeeded } from "../consent/consent.service.js";
 
 function safeEvidence(document: any) {
-  return { docType: document.docType, evidenceStatus: document.evidenceStatus, confidence: document.confidence, crossCheckMethod: document.crossCheckMethod, source: document.source, issuedAt: document.issuedAt, checkedAt: document.checkedAt, expiresAt: document.expiresAt, uploadedAt: document.uploadedAt };
+  return { docType: document.docType, evidenceStatus: document.evidenceStatus, confidence: document.confidence, crossCheckMethod: document.crossCheckMethod, source: document.source, issuedAt: document.issuedAt, checkedAt: document.checkedAt, expiresAt: document.expiresAt, uploadedAt: document.uploadedAt, lifecycle: deriveEvidenceLifecycle(document) };
 }
 
 export async function getTrustView(userId: string, consentRequestId: string) {

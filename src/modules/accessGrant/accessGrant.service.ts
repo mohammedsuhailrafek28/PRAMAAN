@@ -119,7 +119,7 @@ function safeEvidence(document: any) {
 
 export async function resolveGuest(token: string) {
   if (!/^[A-Za-z0-9_-]{40,}$/.test(token)) throw new ApiError(404, "INVALID_ACCESS_LINK", "This access link is not valid.");
-  const grant = await prisma.accessGrant.findUnique({ where: { tokenHash: tokenDigest(token) }, include: { business: { include: { passports: true, documents: { where: { isCurrent: true }, orderBy: { uploadedAt: "desc" } } } } } });
+  const grant = await prisma.accessGrant.findUnique({ where: { tokenHash: tokenDigest(token) }, include: { business: { include: { passports: true, documents: { orderBy: { uploadedAt: "desc" } } } } } });
   if (!grant) throw new ApiError(404, "INVALID_ACCESS_LINK", "This access link is not valid.");
   if (grant.revokedAt || grant.status === AccessGrantStatus.REVOKED) throw new ApiError(410, "ACCESS_REVOKED", "This access link was revoked by the business.");
   if (grant.expiresAt <= new Date()) {
@@ -138,7 +138,7 @@ export async function resolveGuest(token: string) {
   await prisma.accessGrant.update({ where: { id: grant.id }, data: { lastAccessedAt: viewedAt } });
   await writeAuditLog({ businessId: grant.businessId, actorId: grant.createdByUserId, accessGrantId: grant.id, action: AuditAction.GUEST_LINK_OPENED, dedupeWindowMs: 300000, metadata: { accessType: "guest", viewedAt: viewedAt.toISOString(), fields: Object.keys(fields), evidenceTypes: evidence.map((item) => item.docType) } });
   return {
-    grant: { id: grant.id, purpose: grant.purpose, recipientName: grant.recipientName, recipientOrganization: grant.recipientOrganization, createdAt: grant.createdAt, expiresAt: grant.expiresAt },
+    grant: { id: grant.id, purpose: grant.purpose, recipientName: grant.recipientName, recipientOrganization: grant.recipientOrganization, createdAt: grant.createdAt, expiresAt: grant.expiresAt, profileVersion: grant.business.passports.find((item) => item.id === grant.passportId)?.version },
     business: {
       legalName: scope.fields.includes("legalBusinessName") ? grant.business.legalName : undefined,
       gstin: scope.fields.includes("gstin") ? grant.business.gstin : undefined

@@ -303,7 +303,7 @@ async function main() {
     });
     const beforeV2 = await request("GET", `/api/trust-view/${snapshotConsentId}`, { token: snapshotVerifierToken });
     assert(beforeV2.data.metadata.passportVersion === v1Version, "consent did not pin passport v1");
-    assert(beforeV2.data.sharedFields.turnoverBand === businessInput.turnoverBand, "v1 Trust View value mismatch");
+    assert(beforeV2.data.sharedFields.turnoverBand.value === businessInput.turnoverBand, "v1 Trust View value mismatch");
     const v1Evidence = beforeV2.data.evidence[0]?.uploadedAt;
 
     await request("PATCH", "/api/business/me", { token: msmeToken, body: { ...businessInput, turnoverBand: "INR 5Cr-INR 10Cr" } });
@@ -313,7 +313,7 @@ async function main() {
     assert(passportV2.data.passport.snapshotJson.version > v1Version, "passport v2 was not generated");
     const afterV2 = await request("GET", `/api/trust-view/${snapshotConsentId}`, { token: snapshotVerifierToken });
     assert(afterV2.data.metadata.passportVersion === v1Version, "existing consent switched to latest passport");
-    assert(afterV2.data.sharedFields.turnoverBand === businessInput.turnoverBand, "v2-only turnover leaked into v1 consent");
+    assert(afterV2.data.sharedFields.turnoverBand.value === businessInput.turnoverBand, "v2-only turnover leaked into v1 consent");
     assert(afterV2.data.evidence[0]?.uploadedAt === v1Evidence, "v2-only evidence leaked into v1 consent");
 
     const freshConsent = await request("POST", "/api/consent-requests", {
@@ -324,8 +324,25 @@ async function main() {
     await request("PATCH", `/api/consent-requests/${freshConsentId}/approve`, { token: msmeToken, body: { approvedFields: ["turnoverBand"], approvedEvidenceTypes: ["GST_CERTIFICATE"], durationDays: 7 } });
     const freshView = await request("GET", `/api/trust-view/${freshConsentId}`, { token: snapshotVerifierToken });
     assert(freshView.data.metadata.passportVersion === passportV2.data.passport.snapshotJson.version, "new consent did not use v2");
-    assert(freshView.data.sharedFields.turnoverBand === "INR 5Cr-INR 10Cr", "new consent did not expose v2 value");
+    assert(freshView.data.sharedFields.turnoverBand.value === "INR 5Cr-INR 10Cr", "new consent did not expose v2 value");
     assert(freshView.data.evidence[0]?.id === undefined && freshView.data.evidence[0]?.uploadedAt !== v1Evidence, "new consent did not use v2 evidence");
+    const pinnedGuest = await request("POST", "/api/access-grants", { token: msmeToken, body: { purpose: "Vendor onboarding", scope: { fields: ["turnoverBand"], evidenceTypes: ["GST_CERTIFICATE"] }, durationHours: 24 } });
+    const pinnedGuestToken = (pinnedGuest.data.grant.secureUrl as string).split("/verify/")[1];
+    const pinnedGuestV2 = await request("GET", `/api/public/verify/${pinnedGuestToken}`);
+    assert(pinnedGuestV2.data.grant.profileVersion === passportV2.data.passport.snapshotJson.version, "guest profile version missing or incorrect");
+    const guestV2Evidence = pinnedGuestV2.data.evidence[0]?.uploadedAt;
+    assert(["SELF_DECLARED", "DOCUMENT_SUBMITTED", "CROSS_CHECKED", "SOURCE_VERIFIED"].includes(pinnedGuestV2.data.sharedFields.turnoverBand.evidenceStatus), `guest field status missing: ${JSON.stringify(pinnedGuestV2.data.sharedFields.turnoverBand)}`);
+    assert(pinnedGuestV2.data.evidence[0]?.lifecycle?.freshnessState, "guest evidence freshness metadata missing");
+    await uploadDocument(msmeToken, "GST_CERTIFICATE", replacementFile, { issuedAt: "2026-04-01", expiresAt: "2027-04-01", source: "MSME v3 replacement" });
+    await request("POST", "/api/passport/generate", { token: msmeToken });
+    const pinnedGuestAfterV3 = await request("GET", `/api/public/verify/${pinnedGuestToken}`);
+    assert(pinnedGuestAfterV3.data.grant.profileVersion === passportV2.data.passport.snapshotJson.version, "guest link switched to latest passport");
+    assert(pinnedGuestAfterV3.data.evidence[0]?.uploadedAt === guestV2Evidence, "guest link lost its pinned evidence after replacement");
+    const freshGuest = await request("POST", "/api/access-grants", { token: msmeToken, body: { purpose: "Vendor onboarding", scope: { fields: ["turnoverBand"], evidenceTypes: ["GST_CERTIFICATE"] }, durationHours: 24 } });
+    const freshGuestToken = (freshGuest.data.grant.secureUrl as string).split("/verify/")[1];
+    const freshGuestView = await request("GET", `/api/public/verify/${freshGuestToken}`);
+    assert(freshGuestView.data.grant.profileVersion > pinnedGuestV2.data.grant.profileVersion, "new guest link did not use the latest passport");
+    assert(!JSON.stringify(pinnedGuestAfterV3.data).includes("filePath"), "pinned guest response leaked file path");
     await request("PATCH", `/api/consent-requests/${snapshotConsentId}/revoke`, { token: msmeToken });
     await request("PATCH", `/api/consent-requests/${freshConsentId}/revoke`, { token: msmeToken });
     pass("F2. approved consent remains pinned to passport v1 while a new consent uses passport v2 and v2 evidence");
@@ -519,7 +536,11 @@ async function main() {
     const expectedShared = ["legalBusinessName", "gstin", "udyamNumber", "summary"];
     assert(sharedKeys.length === expectedShared.length, `unexpected shared field count: ${sharedKeys.join(",")}`);
     for (const field of expectedShared) assert(sharedKeys.includes(field), `approved field missing: ${field}`);
-    assert(typeof trustView.data.sharedFields.gstin === "string", "approved field should resolve to its scalar value");
+    assert(trustView.data.sharedFields.gstin.value === businessInput.gstin, "approved field value mismatch");
+    assert(trustView.data.sharedFields.gstin.evidenceStatus === "CROSS_CHECKED", "approved field status missing");
+    assert(trustView.data.sharedFields.gstin.source === "INTERNAL_DETERMINISTIC_CHECKS", "field source semantics missing");
+    assert(trustView.data.sharedFields.gstin.lastCheckedAt, "field freshness timestamp missing");
+    assert(trustView.data.evidence.every((item: Json) => item.lifecycle?.freshnessState), "registered evidence freshness metadata missing");
     for (const forbidden of [
       "documents",
       "rawDocuments",
