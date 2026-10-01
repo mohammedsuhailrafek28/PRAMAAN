@@ -95,7 +95,7 @@ export function describeFreshness(state?: string | null): StatusDescriptor | und
 /** Where a value came from, in plain language. Never implies external verification. */
 export function describeSource(source?: string | null): string {
   if (!source || source === "MSME_SUBMITTED") return "Submitted by the business";
-  if (source === "INTERNAL_DETERMINISTIC_CHECKS") return "Pramaan internal cross-checks";
+  if (source === "INTERNAL_DETERMINISTIC_CHECKS") return "Assessed by Pramaan's internal checks";
   return source;
 }
 

@@ -241,13 +241,19 @@ export interface SharedField {
   label: string;
   value: string;
   status?: string;
-  reason?: string;
-  /** For composite values (e.g. per-document check results). */
+  /** e.g. INTERNAL_DETERMINISTIC_CHECKS or MSME_SUBMITTED (never external verification). */
+  source?: string;
+  lastCheckedAt?: string;
+  /** CURRENT or EXPIRED, as of the pinned Trust Profile version. */
+  freshnessState?: string;
+  /** True for values Pramaan computes (Trust summary) rather than claims. */
+  computed?: boolean;
+  /** For composite values (e.g. Trust summary metrics). */
   items?: { label: string; status?: string; detail?: string }[];
 }
 
 export interface GuestVerificationView {
-  grant: { id: string; purpose: string; recipientName?: string; recipientOrganization?: string; createdAt: string; expiresAt: string };
+  grant: { id: string; purpose: string; recipientName?: string; recipientOrganization?: string; createdAt: string; expiresAt: string; profileVersion?: number };
   business: { legalName?: string; gstin?: string };
   fields: SharedField[];
   evidence: SharedEvidence[];

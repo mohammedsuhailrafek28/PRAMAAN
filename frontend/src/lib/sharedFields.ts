@@ -1,8 +1,9 @@
-// Formats values disclosed from a Trust Profile snapshot (registered Trust View
-// and guest links) without inventing status: a field only carries a status
-// when the snapshot itself recorded one.
+// Formats disclosed Trust Profile fields (registered Trust View and secure
+// links). Backend contract (5be69e6): each field is
+// { value, status, evidenceStatus, source, lastCheckedAt, freshnessState }.
+// A field only carries a status when the backend reported one.
 
-import { backendFieldLabel, documentTypeLabel } from "@/lib/fieldLabels";
+import { backendFieldLabel } from "@/lib/fieldLabels";
 import type { SharedField } from "@/types";
 
 type UnknownRecord = Record<string, unknown>;
@@ -18,73 +19,49 @@ function toText(value: unknown): string {
   return "Structured value";
 }
 
-function formatSummary(summary: UnknownRecord): SharedField["items"] {
-  const metrics: [string, string][] = [
-    ["trustReadiness", "Trust readiness"],
-    ["profileCompleteness", "Profile completeness"],
-    ["evidenceStrength", "Evidence strength"],
-    ["consistency", "Consistency"],
-    ["freshness", "Freshness"],
-  ];
-  return metrics
-    .filter(([key]) => typeof summary[key] === "number")
-    .map(([key, label]) => ({ label, detail: `${summary[key]}%` }));
+const SUMMARY_METRICS: [string, string][] = [
+  ["trustReadiness", "Trust readiness"],
+  ["profileCompleteness", "Completeness"],
+  ["evidenceStrength", "Evidence strength"],
+  ["consistency", "Consistency"],
+  ["freshness", "Freshness"],
+];
+
+function str(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
 }
 
 export function formatSharedField(key: string, raw: unknown): SharedField {
   const label = backendFieldLabel(key);
+  const wrapped = isRecord(raw) && "value" in raw;
+  const value = wrapped ? raw.value : raw;
+  const meta = wrapped ? raw : {};
 
-  if (key === "summary" && isRecord(raw)) {
-    const readiness = typeof raw.trustReadiness === "number" ? `${raw.trustReadiness}% trust readiness` : "Summary";
-    return { key, label, value: readiness, items: formatSummary(raw) };
-  }
-
-  if (key === "documentConfidence" && Array.isArray(raw)) {
+  // Trust summary is computed by Pramaan; the backend currently tags it
+  // SELF_DECLARED / MSME_SUBMITTED, so no status or source is shown for it.
+  if (key === "summary" && isRecord(value)) {
     return {
       key,
       label,
-      value: `${raw.length} document${raw.length === 1 ? "" : "s"} checked`,
-      items: raw.filter(isRecord).map((doc) => ({
-        label: documentTypeLabel(String(doc.documentType ?? "Document")),
-        status: typeof doc.status === "string" ? doc.status : undefined,
-        detail: typeof doc.reason === "string" ? doc.reason : undefined,
-      })),
+      value: typeof value.trustReadiness === "number" ? `${value.trustReadiness}% trust readiness` : "Summary",
+      items: SUMMARY_METRICS.filter(([metric]) => typeof value[metric] === "number").map(([metric, metricLabel]) => ({ label: metricLabel, detail: `${value[metric]}%` })),
+      lastCheckedAt: str(meta.lastCheckedAt),
+      computed: true,
     };
   }
 
-  if (Array.isArray(raw)) {
-    return {
-      key,
-      label,
-      value: `${raw.length} item${raw.length === 1 ? "" : "s"}`,
-      items: raw.map((item) =>
-        isRecord(item)
-          ? {
-              label: backendFieldLabel(String(item.field ?? item.type ?? "Item")),
-              status: typeof item.status === "string" ? item.status : undefined,
-              detail: String(item.message ?? item.reason ?? toText(item.value)),
-            }
-          : { label: toText(item) }
-      ),
-    };
-  }
-
-  // Snapshot claim shape: { value, evidenceStatus, confidence, confidenceReason, ... }
-  if (isRecord(raw) && "value" in raw) {
-    return {
-      key,
-      label,
-      value: toText(raw.value),
-      status: typeof raw.evidenceStatus === "string" ? raw.evidenceStatus : undefined,
-      reason: typeof raw.confidenceReason === "string" ? raw.confidenceReason : undefined,
-    };
-  }
-
-  return { key, label, value: toText(raw) };
+  return {
+    key,
+    label,
+    value: toText(value),
+    status: str(meta.status) ?? str(meta.evidenceStatus),
+    source: str(meta.source),
+    lastCheckedAt: str(meta.lastCheckedAt),
+    freshnessState: str(meta.freshnessState),
+  };
 }
 
 export function formatSharedFields(sharedFields: unknown): SharedField[] {
   if (!isRecord(sharedFields)) return [];
   return Object.entries(sharedFields).map(([key, value]) => formatSharedField(key, value));
 }
-
