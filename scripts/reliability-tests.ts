@@ -153,7 +153,14 @@ async function main() {
     assert(oldView.data.metadata.passportVersion === passportV1.data.version, "registered consent shifted to latest profile");
     assert(oldView.data.sharedFields.gstin.value === profile.gstin, "old consent value changed after replacement");
     assert(passportV2.data.version > passportV1.data.version, "v2 was not generated");
-    pass("business mutation and evidence replacement do not shift existing authorization");
+    const newConsent = await request("POST", "/api/consent-requests", { token: buyerA, body: { businessGstin: profile.gstin, requestedFields: ["turnoverBand"], purpose: "Vendor Onboarding" } });
+    const newConsentId = newConsent.data.consentRequestId as string;
+    await request("PATCH", `/api/consent-requests/${newConsentId}/approve`, { token: msmeA, body: { approvedFields: ["turnoverBand"], durationDays: 7 } });
+    const newView = await request("GET", `/api/trust-view/${newConsentId}`, { token: buyerA });
+    assert(newView.data.metadata.passportVersion === passportV2.data.version, "new consent did not use v2");
+    await request("PATCH", `/api/consent-requests/${newConsentId}/revoke`, { token: msmeA });
+    await blocked("GET", `/api/trust-view/${newConsentId}`, buyerA, ["CONSENT_REVOKED"], "revoked registered consent remains blocked");
+    pass("business mutation and evidence replacement do not shift old authorization; new consent uses v2 and revocation holds");
 
     const guest = await request("POST", "/api/access-grants", { token: msmeA, body: { purpose: "Vendor onboarding", scope: { fields: ["gstin"], evidenceTypes: ["GST_CERTIFICATE"] }, durationHours: 24 } });
     const guestToken = (guest.data.grant.secureUrl as string).split("/verify/")[1];
