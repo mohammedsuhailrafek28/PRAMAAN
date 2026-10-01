@@ -4,6 +4,7 @@ import type {
   ConsentRequest, Contradiction, CrossCheckResult, DocumentCheck, EvidenceGap, FieldCheck,
   Notification, Role, TrustProfile, TrustViewResult, User, EvidenceStatus, TrustSummary,
   AccessGrant, GuestLinkFailure, GuestVerificationView, SharedEvidence,
+  ReadinessEvaluation, ReadinessProfileSummary, ReportSummary, ReportType,
 } from "@/types";
 import { formatSharedFields } from "@/lib/sharedFields";
 import { parseScope, type DisclosureScope } from "@/lib/disclosure";
@@ -258,6 +259,7 @@ export async function getAuditLogs(): Promise<AuditLogEntry[]> {
     timestamp: raw.createdAt,
     actor: mapActor(raw.actor),
     requester: mapActor(raw.consentRequest?.requester),
+    requestScope: raw.consentRequest ? parseScope(raw.consentRequest.requestedFields, raw.consentRequest.requestedEvidenceTypes).scope : undefined,
     consentId: raw.consentRequestId || undefined,
     accessGrantId: raw.accessGrantId || undefined,
     metadata: raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata) ? raw.metadata : undefined,
@@ -287,4 +289,25 @@ export async function getGuestVerification(token: string): Promise<{ view: Guest
     if (axios.isAxiosError(error) && error.response?.status === 404) return { failure: "invalid" };
     throw error;
   }
+}
+
+// ---- Readiness ----
+export async function getReadinessProfiles(): Promise<ReadinessProfileSummary[]> { const { data } = await client.get("/readiness-profiles"); return data.profiles; }
+/** Latest stored evaluation for a profile, or null if none has been run. */
+export async function getLatestReadiness(profileId: string): Promise<ReadinessEvaluation | null> {
+  try { const { data } = await client.get(`/readiness-profiles/${profileId}/latest`); return data.evaluation?.summaryJson ?? null; }
+  catch (error) { if (axios.isAxiosError(error) && error.response?.status === 404) return null; throw error; }
+}
+/** Runs an evaluation (re-runs the internal cross-check server-side and records it in Activity). */
+export async function evaluateReadiness(profileId: string): Promise<ReadinessEvaluation> { const { data } = await client.post(`/readiness-profiles/${profileId}/evaluate`); return data; }
+
+// ---- Reports ----
+export async function getReportTypes(): Promise<ReportType[]> { const { data } = await client.get("/report-types"); return data.reportTypes; }
+export async function getReports(): Promise<ReportSummary[]> { const { data } = await client.get("/reports"); return data.reports; }
+export async function generateReport(reportType: string): Promise<ReportSummary> { const { data } = await client.post("/reports/generate", { reportType }); return data.report; }
+export async function revokeReport(reportId: string): Promise<void> { await client.post(`/reports/${reportId}/revoke`); }
+/** Report files are owner-only and need the bearer token, so they are fetched as blobs. */
+export async function getReportFile(reportId: string, kind: "preview" | "pdf"): Promise<Blob> {
+  const { data } = await client.get(`/reports/${reportId}/${kind}`, { responseType: "blob", timeout: 60000 });
+  return data;
 }

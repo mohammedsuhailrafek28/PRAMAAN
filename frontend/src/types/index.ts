@@ -192,6 +192,8 @@ export interface AuditLogEntry {
   timestamp: string;
   actor?: AuditActor;
   requester?: AuditActor;
+  /** Scope originally requested on the related consent (for "approved X of Y"). */
+  requestScope?: DisclosureScope;
   consentId?: string;
   accessGrantId?: string;
   metadata?: Record<string, unknown>;
@@ -281,3 +283,70 @@ export type TrustViewResult =
 
 /** Why a guest link cannot be opened. */
 export type GuestLinkFailure = "revoked" | "expired" | "invalid" | "unavailable";
+
+// ---- Readiness (backend: src/modules/readinessEngine) ----
+
+export type ReadinessLevel = "NOT_READY" | "EARLY_STAGE" | "PARTIALLY_READY" | "MOSTLY_READY" | "READY_FOR_REVIEW" | "BLOCKED";
+export type RequirementStatus = "SATISFIED" | "PARTIALLY_SATISFIED" | "MISSING" | "BLOCKED" | "MANUAL_REVIEW" | "NOT_APPLICABLE";
+
+export interface ReadinessProfileSummary {
+  id: string;
+  version: string;
+  name: string;
+  purpose: string;
+  description: string;
+  disclaimer: string;
+}
+
+export interface ReadinessRequirementResult {
+  requirementId: string;
+  label: string;
+  status: RequirementStatus;
+  reason: string;
+  blockingIssues: { code: string; message: string }[];
+}
+
+export interface ReadinessNextAction {
+  priority: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+  requirementId: string;
+  title: string;
+  description: string;
+}
+
+export interface ReadinessEvaluation {
+  profile: ReadinessProfileSummary;
+  evaluatedAt: string;
+  result: {
+    score: number;
+    level: ReadinessLevel;
+    blocked: boolean;
+    satisfiedRequirements: number;
+    partialRequirements: number;
+    missingRequirements: number;
+    totalApplicableRequirements: number;
+  };
+  requirements: ReadinessRequirementResult[];
+  blockingIssues: { code: string; message: string }[];
+  nextActions: ReadinessNextAction[];
+  limitations: string[];
+}
+
+// ---- Reports (backend: src/modules/reportComposer) ----
+
+export interface ReportType {
+  reportType: string;
+  displayName: string;
+  description: string;
+  disclaimer: string;
+}
+
+export interface ReportSummary {
+  reportId: string;
+  reportType: string;
+  reportVersion: string;
+  generatedAt: string;
+  revokedAt?: string | null;
+  headlineStatus?: string | null;
+  score?: number | null;
+  level?: string | null;
+}

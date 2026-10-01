@@ -1,6 +1,8 @@
 import {
   Archive,
   Building2,
+  ClipboardCheck,
+  FileText,
   History,
   KeyRound,
   Layers,
@@ -53,6 +55,13 @@ export const NAV_BY_ROLE: Record<Role, NavSection[]> = {
       items: [
         { to: ROUTES.consent, label: "Consent & Access", icon: KeyRound },
         { to: ROUTES.activity, label: "Activity", icon: History },
+      ],
+    },
+    {
+      label: "Prepare",
+      items: [
+        { to: ROUTES.readiness, label: "Readiness", icon: ClipboardCheck },
+        { to: ROUTES.reports, label: "Reports", icon: FileText },
       ],
     },
     { label: "Account", items: [{ to: ROUTES.msmeSettings, label: "Settings", icon: Settings }] },

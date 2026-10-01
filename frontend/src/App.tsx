@@ -14,6 +14,8 @@ import { MsmeDashboard } from "@/pages/msme/MsmeDashboard";
 import { BusinessVerificationPage } from "@/pages/msme/BusinessVerificationPage";
 import { TrustProfilePage } from "@/pages/msme/TrustProfilePage";
 import { ConsentCenterPage } from "@/pages/msme/ConsentCenterPage";
+import { ReadinessPage } from "@/pages/msme/ReadinessPage";
+import { ReportsPage } from "@/pages/msme/ReportsPage";
 import { AuditLogPage } from "@/pages/msme/AuditLogPage";
 import { EvidenceVaultPage } from "@/pages/msme/EvidenceVaultPage";
 
@@ -42,6 +44,8 @@ export default function App() {
               <Route path="/msme/verification" element={<BusinessVerificationPage />} />
               <Route path="/msme/trust-profile" element={<TrustProfilePage />} />
               <Route path="/msme/consent" element={<ConsentCenterPage />} />
+              <Route path="/msme/readiness" element={<ReadinessPage />} />
+              <Route path="/msme/reports" element={<ReportsPage />} />
               <Route path="/msme/consent-requests" element={<Navigate to="/msme/consent" replace />} />
               <Route path="/msme/audit-log" element={<AuditLogPage />} />
               <Route path="/msme/evidence-vault" element={<EvidenceVaultPage />} />

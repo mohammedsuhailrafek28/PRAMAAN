@@ -63,7 +63,7 @@ const LINK_STATUS: Record<"ACTIVE" | "EXPIRED" | "REVOKED", StatusDescriptor> = 
 };
 
 export function humanize(value: string): string {
-  const spaced = value.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().trim();
+  const spaced = value.replace(/[_-]/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().trim();
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
