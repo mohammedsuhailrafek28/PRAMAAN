@@ -7,9 +7,10 @@ import type { Role } from "@/types";
 import { cn } from "@/lib/utils";
 
 const DEMO_IDENTITIES: { role: Role; label: string; sub: string }[] = [
-  { role: "msme", label: "Rajeev Sharma", sub: "Sharma Textiles (MSME)" },
-  { role: "buyer", label: "Priya Nair", sub: "Acme Retail Buyers" },
-  { role: "bank", label: "Vikram Rao", sub: "Kisan NBFC" },
+  // Must match prisma/seed.ts demo accounts.
+  { role: "msme", label: "Ravi Sharma", sub: "Sharma Textiles (MSME)" },
+  { role: "buyer", label: "Ananya Iyer", sub: "Acme Retail Buyers (Buyer)" },
+  { role: "bank", label: "Karan Mehta", sub: "Kisan NBFC (Bank)" },
 ];
 
 /**
@@ -32,10 +33,12 @@ export function RoleSwitcher() {
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 rounded-md border border-border bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-subtle hover:bg-surface"
+        aria-expanded={open}
+        aria-label="Switch demo role"
+        className="flex items-center gap-2 rounded-md border border-border bg-white px-2.5 py-1.5 text-sm font-medium sm:px-3 text-slate-700 shadow-subtle hover:bg-surface"
       >
         <Repeat className="h-3.5 w-3.5 text-primary-600" />
-        Switch demo role
+        <span className="hidden sm:inline">Switch demo role</span>
         <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
       </button>
 
