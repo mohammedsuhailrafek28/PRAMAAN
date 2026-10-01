@@ -64,7 +64,7 @@ function Row({ entries, compact }: { entries: AuditLogEntry[]; compact: boolean 
           </time>
         </div>
         {shown.map((detail) => <p key={detail} className="mt-0.5 break-words text-xs text-slate-500">{detail}</p>)}
-        {details.length > shown.length && <p className="mt-0.5 text-xs text-slate-400">+{details.length - shown.length} more</p>}
+        {details.length > shown.length && <p className="mt-0.5 text-xs text-slate-500">+{details.length - shown.length} more</p>}
       </div>
     </li>
   );

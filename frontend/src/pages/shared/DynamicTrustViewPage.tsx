@@ -144,14 +144,14 @@ export function DynamicTrustViewPage() {
             <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
               <FactList
                 facts={[
-                  { label: "Trust Profile version", value: <span className="inline-flex items-center gap-1.5"><Layers className="h-3.5 w-3.5 text-slate-400" aria-hidden />Shared from Trust Profile v{active.profileVersion ?? "—"}</span> },
+                  { label: "Trust Profile version", value: <span className="inline-flex items-center gap-1.5"><Layers className="h-3.5 w-3.5 text-slate-500" aria-hidden />Shared from Trust Profile v{active.profileVersion ?? "—"}</span> },
                   { label: "Last checked", value: formatDateTime(active.fields.find((f) => f.lastCheckedAt)?.lastCheckedAt) },
                   { label: "How values were checked", value: describeSource("INTERNAL_DETERMINISTIC_CHECKS") },
                   { label: "Access granted", value: formatDateTime(active.grantedAt) },
                 ]}
               />
               <div className="flex gap-2.5 rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
-                <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
                 <p>{NOT_EXTERNALLY_VERIFIED} You can see only what the business approved; files are never shared. Each time you open or refresh this case it is recorded in the business's activity log.</p>
               </div>
             </div>

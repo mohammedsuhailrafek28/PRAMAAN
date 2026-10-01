@@ -14,12 +14,12 @@ export function ScopeColumns({ scope, withheld, emptyText = "None" }: { scope: D
         {title}
       </p>
       {keys.length === 0 && withheldKeys.length === 0 ? (
-        <p className="mt-2 text-sm text-slate-400">{emptyText}</p>
+        <p className="mt-2 text-sm text-slate-500">{emptyText}</p>
       ) : (
         <ul className="mt-2 space-y-1">
           {keys.map((key) => <li key={key} className="text-sm text-slate-800">{disclosureItem(key)?.label ?? key}</li>)}
           {withheldKeys.map((key) => (
-            <li key={`w-${key}`} className="text-sm text-slate-400">
+            <li key={`w-${key}`} className="text-sm text-slate-500">
               <span className="line-through">{disclosureItem(key)?.label ?? key}</span>
               <span className="ml-1.5 text-xs no-underline">not shared</span>
             </li>

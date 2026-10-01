@@ -43,7 +43,7 @@ export function SharedEvidenceRow({ evidence }: { evidence: SharedEvidence }) {
   return (
     <div className="rounded-lg border border-slate-200 p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <p className="flex items-center gap-2 text-sm font-semibold text-slate-900"><FileText className="h-4 w-4 text-slate-400" aria-hidden />{disclosureItem(evidence.docType)?.label ?? evidence.docType}</p>
+        <p className="flex items-center gap-2 text-sm font-semibold text-slate-900"><FileText className="h-4 w-4 text-slate-500" aria-hidden />{disclosureItem(evidence.docType)?.label ?? evidence.docType}</p>
         <EvidenceBadges status={evidence.evidenceStatus} lifecycle={evidence.lifecycle?.state} />
       </div>
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs sm:grid-cols-4">

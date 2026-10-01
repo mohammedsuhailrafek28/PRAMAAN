@@ -168,7 +168,7 @@ export function TrustProfilePage() {
 
       <SectionCard title="What Pramaan does not verify" description="Read this before relying on the Trust Card.">
         <div className="flex gap-3">
-          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-slate-400" aria-hidden />
+          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-slate-500" aria-hidden />
           <ul className="list-disc space-y-1.5 pl-4 text-sm text-slate-700">
             <li>{NOT_EXTERNALLY_VERIFIED}</li>
             {trustProfile.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}

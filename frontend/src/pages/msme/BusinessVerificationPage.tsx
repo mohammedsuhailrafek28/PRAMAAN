@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SectionCard } from "@/components/shared/SectionCard";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { EvidenceStatusBadge } from "@/components/shared/EvidenceStatusBadge";
 import { useAppStore } from "@/store/appStore";
 import { TURNOVER_BANDS, type CrossCheckResult, type DocumentType } from "@/types";
@@ -153,12 +154,11 @@ export function BusinessVerificationPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Business Profile</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Submit your business claims and supporting evidence. Pramaan runs a deterministic internal cross-check; it does not query government or banking systems.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Trust"
+        title="Business Profile"
+        description="Your business claims. Saving runs Pramaan's deterministic internal cross-check against your evidence; it does not query government or banking systems."
+      />
 
       {error && <div role="alert" className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"><AlertCircle className="h-4 w-4 shrink-0" />{error}</div>}
 

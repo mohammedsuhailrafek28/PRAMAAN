@@ -84,7 +84,7 @@ export function ExternalVerificationPage() {
               { label: "Shared with", value: view.grant.recipientOrganization || view.grant.recipientName || "Not specified" },
               { label: "Shared on", value: formatDateTime(view.grant.createdAt) },
               { label: "Expires", value: formatDateTime(view.grant.expiresAt) },
-              { label: "Trust Profile", value: <span className="inline-flex items-center gap-1.5"><Layers className="h-3.5 w-3.5 text-slate-400" aria-hidden />{version ? `Shared from v${version}` : "Fixed version"}</span> },
+              { label: "Trust Profile", value: <span className="inline-flex items-center gap-1.5"><Layers className="h-3.5 w-3.5 text-slate-500" aria-hidden />{version ? `Shared from v${version}` : "Fixed version"}</span> },
             ]}
           />
         </SectionCard>

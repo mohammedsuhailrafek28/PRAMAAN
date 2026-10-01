@@ -27,7 +27,7 @@ export function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
     <nav aria-label="Main" className="flex-1 space-y-5 overflow-y-auto px-3 py-5">
       {sections.map((section, index) => (
         <div key={section.label ?? index}>
-          {section.label && <p className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">{section.label}</p>}
+          {section.label && <p className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500">{section.label}</p>}
           <ul className="space-y-0.5">
             {section.items.map((item) => (
               <li key={item.to}>

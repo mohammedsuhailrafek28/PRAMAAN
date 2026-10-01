@@ -84,7 +84,7 @@ function SlotCard({ slot, onUpload }: { slot: EvidenceSlot; onUpload: () => void
               type="button"
               onClick={() => setShowHistory((v) => !v)}
               aria-expanded={showHistory}
-              className="flex w-full items-center justify-between rounded-md px-1 py-1 text-xs font-medium text-slate-600 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex min-h-9 w-full items-center justify-between rounded-md px-1 text-xs font-medium text-slate-600 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <span className="flex items-center gap-1.5"><History className="h-3.5 w-3.5" aria-hidden />Version history ({slot.history.length})</span>
               <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showHistory && "rotate-180")} aria-hidden />

@@ -79,7 +79,7 @@ export function RegisterPage() {
                 type="button"
                 onClick={() => setRole(tab.role)}
                 className={cn(
-                  "flex flex-col items-center gap-1 rounded-sm px-2 py-2 text-xs font-medium text-muted-foreground transition-colors",
+                  "flex flex-col items-center gap-1 rounded-sm px-2 py-2 text-xs font-medium text-slate-600 transition-colors",
                   role === tab.role && "bg-white text-slate-900 shadow-subtle"
                 )}
               >

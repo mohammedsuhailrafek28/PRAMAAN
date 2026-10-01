@@ -23,7 +23,7 @@ function SummaryTile({ icon: Icon, label, value, detail, to, children }: { icon:
       className="group rounded-lg border border-border bg-white p-4 shadow-card transition-all hover:-translate-y-px hover:border-primary-200 hover:shadow-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="flex items-center justify-between">
-        <p className="flex items-center gap-2 text-xs font-medium text-slate-500"><Icon className="h-4 w-4 text-slate-400" aria-hidden />{label}</p>
+        <p className="flex items-center gap-2 text-xs font-medium text-slate-500"><Icon className="h-4 w-4 text-slate-500" aria-hidden />{label}</p>
         <ArrowRight className="h-3.5 w-3.5 text-slate-300 transition-colors group-hover:text-primary-700" aria-hidden />
       </div>
       <p className="mt-2 text-xl font-semibold tracking-tight text-slate-900 tabular-nums">{value}</p>

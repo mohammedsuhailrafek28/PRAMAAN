@@ -91,7 +91,7 @@ function TrustCardVisual({ revoked = false, compact = false }: { revoked?: boole
             ["Freshness", "Current"],
           ].map(([label, value]) => (
             <div key={label} className="rounded-2xl border border-white/10 bg-black/20 p-4">
-              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-slate-400">{label}</p>
+              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-slate-500">{label}</p>
               <p className="mt-2 truncate text-sm font-medium text-white">{value}</p>
             </div>
           ))}
@@ -269,7 +269,7 @@ function ConsentSequence() {
                 </div>
                 <div>
                   <h3 className="font-medium text-white">{step.title}</h3>
-                  <p className="mt-1 text-sm text-slate-400">{step.body}</p>
+                  <p className="mt-1 text-sm text-slate-500">{step.body}</p>
                 </div>
               </motion.div>
             ))}
@@ -286,7 +286,7 @@ function ConsentSequence() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-white">Acme Retail Buyers</p>
-                <p className="text-xs text-slate-400">Requests Trust Profile fields</p>
+                <p className="text-xs text-slate-500">Requests Trust Profile fields</p>
               </div>
               <span className="rounded-full bg-amber-300/10 px-3 py-1 text-xs text-amber-200">Pending</span>
             </div>
@@ -298,7 +298,7 @@ function ConsentSequence() {
                     "rounded-full border px-3 py-1 text-xs",
                     index < approvedFields.length
                       ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-100"
-                      : "border-white/10 bg-white/5 text-slate-400 line-through"
+                      : "border-white/10 bg-white/5 text-slate-500 line-through"
                   )}
                 >
                   {field}
@@ -407,7 +407,7 @@ export function LandingPage() {
         </motion.div>
       </section>
 
-      <footer className="border-t border-white/10 px-6 py-8 text-center text-xs text-slate-500">
+      <footer className="border-t border-white/10 px-6 py-8 text-center text-xs text-slate-400">
         Pramaan demo. Representative data only. Pramaan cross-checks submitted evidence internally and does not query GST, Udyam, or bank systems. No lending, credit scoring, blockchain, or AI.
       </footer>
     </div>

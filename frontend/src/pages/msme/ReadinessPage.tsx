@@ -175,7 +175,7 @@ export function ReadinessPage() {
           </SectionCard>
 
           <div className="flex gap-2.5 rounded-lg border border-border bg-white p-4 text-sm text-slate-600">
-            <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
             <div className="space-y-1.5">
               <p>{evaluation.profile.disclaimer}</p>
               {[...new Set(evaluation.limitations)].filter((item) => item !== evaluation.profile.disclaimer).map((item) => <p key={item} className="text-xs text-slate-500">{item}</p>)}

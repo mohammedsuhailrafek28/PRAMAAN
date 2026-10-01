@@ -35,7 +35,7 @@ export function RoleSwitcher() {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-label="Switch demo role"
-        className="flex items-center gap-2 rounded-md border border-border bg-white px-2.5 py-1.5 text-sm font-medium sm:px-3 text-slate-700 shadow-subtle hover:bg-surface"
+        className="flex h-10 min-w-10 items-center justify-center gap-2 rounded-md border border-border bg-white px-2.5 text-sm font-medium sm:px-3 text-slate-700 shadow-subtle hover:bg-surface"
       >
         <Repeat className="h-3.5 w-3.5 text-primary-600" />
         <span className="hidden sm:inline">Switch demo role</span>

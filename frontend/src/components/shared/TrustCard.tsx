@@ -78,7 +78,7 @@ export function TrustCard({ profile }: { profile: TrustProfile }) {
               {profile.documents.length === 0 && <li className="px-3 py-2.5 text-sm text-slate-500">No evidence was on file.</li>}
               {profile.documents.map((doc) => (
                 <li key={doc.documentId} className="flex items-center justify-between gap-3 px-3 py-2.5">
-                  <span className="flex items-center gap-2 text-sm text-slate-800"><FileText className="h-4 w-4 text-slate-400" aria-hidden />{documentTypeLabel(doc.documentType)}</span>
+                  <span className="flex items-center gap-2 text-sm text-slate-800"><FileText className="h-4 w-4 text-slate-500" aria-hidden />{documentTypeLabel(doc.documentType)}</span>
                   <EvidenceStatusBadge status={doc.status} />
                 </li>
               ))}
@@ -88,7 +88,7 @@ export function TrustCard({ profile }: { profile: TrustProfile }) {
       </div>
 
       <p className="flex items-start gap-2 bg-slate-50 px-5 py-3.5 text-xs leading-5 text-slate-600 sm:px-7">
-        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden />
         Pramaan cross-checks the business's own claims and documents against each other. It does not query GST, Udyam, bank or other government systems, and this card is not a certificate.
       </p>
     </article>
