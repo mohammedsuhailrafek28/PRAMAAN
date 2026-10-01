@@ -105,6 +105,13 @@ const migrations = [
     tables: [],
     columns: { ConsentRequest: ["purpose"] },
     indexes: []
+  },
+  {
+    name: "202610010001_finals_disclosure_hardening",
+    file: path.join(root, "prisma", "migrations", "202610010001_finals_disclosure_hardening", "migration.sql"),
+    tables: [],
+    columns: { ConsentRequest: ["requestedEvidenceTypes", "approvedEvidenceTypes", "approvedPassportId"], AccessGrant: ["passportId"] },
+    indexes: ["ConsentRequest_approvedPassportId_idx", "AccessGrant_passportId_idx"]
   }
 ] as const;
 

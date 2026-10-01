@@ -9,7 +9,22 @@ export async function writeAuditLog(input: {
   consentRequestId?: string | null;
   accessGrantId?: string | null;
   metadata?: Prisma.InputJsonValue;
+  dedupeWindowMs?: number;
 }) {
+  if (input.dedupeWindowMs) {
+    const existing = await prisma.auditLog.findFirst({
+      where: {
+        businessId: input.businessId,
+        actorId: input.actorId,
+        action: input.action,
+        consentRequestId: input.consentRequestId ?? null,
+        accessGrantId: input.accessGrantId ?? null,
+        createdAt: { gte: new Date(Date.now() - input.dedupeWindowMs) }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+    if (existing) return existing;
+  }
   return prisma.auditLog.create({
     data: {
       businessId: input.businessId,

@@ -1,33 +1,15 @@
 import type { Prisma } from "@prisma/client";
+import { DISCLOSURE_FIELD_KEYS, disclosureFieldValue } from "./disclosureCatalogue.js";
 
-export const allowedPassportFields = [
-  "legalBusinessName",
-  "ownerName",
-  "gstin",
-  "udyamNumber",
-  "pan",
-  "address",
-  "turnoverBand",
-  "bankAccount",
-  "summary",
-  "fieldConfidence",
-  "documentConfidence",
-  "gaps",
-  "contradictions",
-  "limitations",
-  "sourceVerificationPerformed",
-  "lastCalculatedAt",
-  "generatedAt",
-  "version"
-] as const;
+export const allowedPassportFields = DISCLOSURE_FIELD_KEYS;
 
-export type PassportField = (typeof allowedPassportFields)[number];
+export type PassportField = string;
 
 export function filterPassportFields(snapshot: Prisma.JsonValue, fields: string[]) {
   const source = snapshot as Record<string, unknown>;
   return fields.reduce<Record<string, unknown>>((acc, field) => {
-    if (allowedPassportFields.includes(field as PassportField) && field in source) {
-      acc[field] = source[field];
+    if (allowedPassportFields.includes(field) && field in source) {
+      acc[field] = disclosureFieldValue(snapshot, field);
     }
     return acc;
   }, {});

@@ -3,12 +3,11 @@ import { AccessGrantStatus, AuditAction, type Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { env } from "../../config/env.js";
 import { ApiError } from "../../utils/apiError.js";
-import { allowedPassportFields } from "../../utils/fieldFilter.js";
+import { filterPassportFields } from "../../utils/fieldFilter.js";
+import { validateDisclosureKeys } from "../../utils/disclosureCatalogue.js";
 import { deriveEvidenceLifecycle } from "../evidence/evidence-lifecycle.service.js";
 import { writeAuditLog } from "../audit/audit.service.js";
 
-const shareableFields = new Set(["legalBusinessName", "ownerName", "gstin", "udyamNumber", "address", "turnoverBand", "summary"]);
-const shareableEvidenceTypes = new Set(["GST_CERTIFICATE", "UDYAM_CERTIFICATE", "BANK_STATEMENT"]);
 const purposes = new Set(["Business verification", "Loan application", "Vendor onboarding", "Procurement", "Other"]);
 
 export type GrantScope = { fields: string[]; evidenceTypes: string[] };
@@ -20,8 +19,8 @@ function tokenDigest(token: string) {
 function validateScope(scope: GrantScope) {
   const fields = [...new Set(scope.fields)];
   const evidenceTypes = [...new Set(scope.evidenceTypes)];
-  const invalidFields = fields.filter((field) => !allowedPassportFields.includes(field as never) || !shareableFields.has(field));
-  const invalidEvidence = evidenceTypes.filter((type) => !shareableEvidenceTypes.has(type));
+  const invalidFields = validateDisclosureKeys(fields, "FIELD");
+  const invalidEvidence = validateDisclosureKeys(evidenceTypes, "EVIDENCE");
   if (invalidFields.length || invalidEvidence.length || (!fields.length && !evidenceTypes.length)) {
     throw new ApiError(400, "VALIDATION_ERROR", "Scope contains unsupported or empty fields.");
   }
@@ -54,6 +53,8 @@ export async function create(user: Express.User, input: {
   const scope = validateScope(input.scope);
   const business = await prisma.business.findUnique({ where: { userId: user.id } });
   if (!business) throw new ApiError(404, "NOT_FOUND", "Business profile not found.");
+  const passport = await prisma.passport.findFirst({ where: { businessId: business.id }, orderBy: { version: "desc" } });
+  if (!passport) throw new ApiError(409, "PROFILE_NOT_READY", "Business Trust Profile has not been generated yet.");
 
   const expiresAt = input.expiresAt
     ? new Date(input.expiresAt)
@@ -72,11 +73,12 @@ export async function create(user: Express.User, input: {
       recipientEmail: input.recipientEmail?.trim() || undefined,
       purpose: input.purpose,
       scopeJson: scope as Prisma.InputJsonValue,
+      passportId: passport.id,
       tokenHash: tokenDigest(token),
       expiresAt
     }
   });
-  await writeAuditLog({ businessId: business.id, actorId: user.id, accessGrantId: grant.id, action: AuditAction.ACCESS_GRANT_CREATED, metadata: { purpose: grant.purpose, scope } });
+  await writeAuditLog({ businessId: business.id, actorId: user.id, accessGrantId: grant.id, action: AuditAction.GUEST_LINK_CREATED, metadata: { purpose: grant.purpose, scope } });
   return toPublicGrant(grant, true, token);
 }
 
@@ -84,7 +86,8 @@ export async function list(userId: string) {
   const business = await prisma.business.findUnique({ where: { userId } });
   if (!business) throw new ApiError(404, "NOT_FOUND", "Business profile not found.");
   const grants = await prisma.accessGrant.findMany({ where: { businessId: business.id }, orderBy: { createdAt: "desc" } });
-  return grants.map((grant) => toPublicGrant(grant));
+  await Promise.all(grants.filter((grant) => grant.status === AccessGrantStatus.ACTIVE && grant.expiresAt <= new Date()).map((grant) => prisma.accessGrant.updateMany({ where: { id: grant.id, status: AccessGrantStatus.ACTIVE }, data: { status: AccessGrantStatus.EXPIRED } })));
+  return grants.map((grant) => toPublicGrant({ ...grant, status: grant.status === AccessGrantStatus.ACTIVE && grant.expiresAt <= new Date() ? AccessGrantStatus.EXPIRED : grant.status }));
 }
 
 export async function revoke(userId: string, id: string) {
@@ -94,7 +97,7 @@ export async function revoke(userId: string, id: string) {
   if (!grant || grant.businessId !== business.id) throw new ApiError(404, "NOT_FOUND", "Access grant not found.");
   if (grant.revokedAt) return toPublicGrant(grant);
   const updated = await prisma.accessGrant.update({ where: { id }, data: { status: AccessGrantStatus.REVOKED, revokedAt: new Date() } });
-  await writeAuditLog({ businessId: business.id, actorId: userId, accessGrantId: id, action: AuditAction.ACCESS_GRANT_REVOKED, metadata: { revokedAt: updated.revokedAt?.toISOString() } });
+  await writeAuditLog({ businessId: business.id, actorId: userId, accessGrantId: id, action: AuditAction.GUEST_LINK_REVOKED, metadata: { revokedAt: updated.revokedAt?.toISOString() } });
   return toPublicGrant(updated);
 }
 
@@ -102,11 +105,8 @@ function safeEvidence(document: any) {
   const lifecycle = deriveEvidenceLifecycle(document);
   return {
     docType: document.docType,
-    originalName: document.originalName,
-    mimeType: document.mimeType,
     evidenceStatus: document.evidenceStatus,
     confidence: document.confidence,
-    confidenceReason: document.confidenceReason,
     crossCheckMethod: document.crossCheckMethod,
     source: document.source,
     issuedAt: document.issuedAt,
@@ -119,26 +119,23 @@ function safeEvidence(document: any) {
 
 export async function resolveGuest(token: string) {
   if (!/^[A-Za-z0-9_-]{40,}$/.test(token)) throw new ApiError(404, "INVALID_ACCESS_LINK", "This access link is not valid.");
-  const grant = await prisma.accessGrant.findUnique({ where: { tokenHash: tokenDigest(token) }, include: { business: { include: { passports: { orderBy: { version: "desc" }, take: 1 }, documents: { where: { isCurrent: true }, orderBy: { uploadedAt: "desc" } } } } } });
+  const grant = await prisma.accessGrant.findUnique({ where: { tokenHash: tokenDigest(token) }, include: { business: { include: { passports: true, documents: { where: { isCurrent: true }, orderBy: { uploadedAt: "desc" } } } } } });
   if (!grant) throw new ApiError(404, "INVALID_ACCESS_LINK", "This access link is not valid.");
   if (grant.revokedAt || grant.status === AccessGrantStatus.REVOKED) throw new ApiError(410, "ACCESS_REVOKED", "This access link was revoked by the business.");
   if (grant.expiresAt <= new Date()) {
-    await prisma.accessGrant.update({ where: { id: grant.id }, data: { status: AccessGrantStatus.ACTIVE } });
-    await writeAuditLog({ businessId: grant.businessId, actorId: grant.createdByUserId, accessGrantId: grant.id, action: AuditAction.ACCESS_GRANT_EXPIRED, metadata: { expiredAt: new Date().toISOString() } });
+    await prisma.accessGrant.updateMany({ where: { id: grant.id, status: AccessGrantStatus.ACTIVE }, data: { status: AccessGrantStatus.EXPIRED } });
+    await writeAuditLog({ businessId: grant.businessId, actorId: grant.createdByUserId, accessGrantId: grant.id, action: AuditAction.GUEST_LINK_EXPIRED, dedupeWindowMs: 86400000, metadata: { expiredAt: grant.expiresAt.toISOString() } });
     throw new ApiError(410, "ACCESS_EXPIRED", "This access link has expired.");
   }
 
   const scope = grant.scopeJson as GrantScope;
-  const snapshot = grant.business.passports?.[0]?.snapshotJson;
-  const fields = scope.fields.reduce<Record<string, unknown>>((result, field) => {
-    const value = (snapshot as Record<string, unknown> | undefined)?.[field];
-    if (value !== undefined) result[field] = value;
-    return result;
-  }, {});
+  const snapshot = grant.business.passports?.find((item) => item.id === grant.passportId)?.snapshotJson;
+  if (!snapshot) throw new ApiError(410, "PROFILE_SNAPSHOT_UNAVAILABLE", "The pinned Trust Profile snapshot is unavailable.");
+  const fields = filterPassportFields(snapshot, scope.fields);
   const evidence = grant.business.documents.filter((document) => scope.evidenceTypes.includes(document.docType)).map(safeEvidence);
   const viewedAt = new Date();
   await prisma.accessGrant.update({ where: { id: grant.id }, data: { lastAccessedAt: viewedAt } });
-  await writeAuditLog({ businessId: grant.businessId, actorId: grant.createdByUserId, accessGrantId: grant.id, action: AuditAction.ACCESS_GRANT_VIEWED, metadata: { accessType: "guest", viewedAt: viewedAt.toISOString(), fields: Object.keys(fields), evidenceTypes: evidence.map((item) => item.docType) } });
+  await writeAuditLog({ businessId: grant.businessId, actorId: grant.createdByUserId, accessGrantId: grant.id, action: AuditAction.GUEST_LINK_OPENED, dedupeWindowMs: 300000, metadata: { accessType: "guest", viewedAt: viewedAt.toISOString(), fields: Object.keys(fields), evidenceTypes: evidence.map((item) => item.docType) } });
   return {
     grant: { id: grant.id, purpose: grant.purpose, recipientName: grant.recipientName, recipientOrganization: grant.recipientOrganization, createdAt: grant.createdAt, expiresAt: grant.expiresAt },
     business: {

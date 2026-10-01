@@ -428,11 +428,17 @@ async function main() {
       token: buyerToken,
       body: {
         businessGstin: businessInput.gstin,
-        requestedFields: ["legalBusinessName", "gstin", "udyamNumber", "summary", "limitations"]
+        requestedFields: ["legalBusinessName", "gstin", "udyamNumber", "summary"]
       }
     });
     const consentId = consentCreate.data.consentRequestId;
     assert(consentCreate.data.status === "PENDING", "consent not pending");
+    const outgoing = await request("GET", "/api/consent-requests?scope=outgoing", { token: buyerToken });
+    const outgoingRequest = outgoing.data.requests.find((item: Json) => item.id === consentId);
+    assert(outgoingRequest && outgoingRequest.business && Object.keys(outgoingRequest.business).sort().join(",") === "gstin,id,legalName", "outgoing consent leaks private business fields");
+    for (const forbidden of ["pan", "address", "turnoverBand", "documents", "user", "userId"]) assert(!JSON.stringify(outgoingRequest).includes(forbidden), `pending consent leaked ${forbidden}`);
+    await request("POST", "/api/consent-requests", { token: buyerToken, body: { businessGstin: businessInput.gstin, requestedFields: ["pan"] }, expected: [400] });
+    pass("R1. pending consent responses are redacted and unsafe disclosure keys are rejected");
     let msmeNotifications = await request("GET", "/api/notifications", { token: msmeToken });
     assert(
       msmeNotifications.data.notifications.some((item: Json) => item.message.includes("Acme Retail Buyers")),
@@ -469,9 +475,7 @@ async function main() {
     const expectedShared = ["legalBusinessName", "gstin", "udyamNumber", "summary"];
     assert(sharedKeys.length === expectedShared.length, `unexpected shared field count: ${sharedKeys.join(",")}`);
     for (const field of expectedShared) assert(sharedKeys.includes(field), `approved field missing: ${field}`);
-    assert(trustView.data.sharedFields.gstin.evidenceStatus, "approved field missing evidence status");
-    assert(typeof trustView.data.sharedFields.gstin.confidence === "number", "approved field missing confidence");
-    assert(trustView.data.sharedFields.gstin.confidenceReason, "approved field missing confidence reason");
+    assert(typeof trustView.data.sharedFields.gstin === "string", "approved field should resolve to its scalar value");
     for (const forbidden of [
       "documents",
       "rawDocuments",
@@ -489,7 +493,7 @@ async function main() {
       assert(!sharedKeys.includes(forbidden), `unapproved field leaked: ${forbidden}`);
     }
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
-    assert(getActions(audit.data).includes("TRUST_PROFILE_VIEWED"), "TRUST_PROFILE_VIEWED audit missing");
+    assert(getActions(audit.data).includes("TRUST_VIEW_OPENED"), "TRUST_VIEW_OPENED audit missing");
     pass("U. buyer dynamic trust view returns only approved fields, no report data, and records VIEWED");
 
     const otherBuyer = await request("POST", "/api/auth/register", {
@@ -546,7 +550,7 @@ async function main() {
       "TRUST_PROFILE_GENERATED",
       "CONSENT_REQUESTED",
       "CONSENT_APPROVED",
-      "TRUST_PROFILE_VIEWED",
+      "TRUST_VIEW_OPENED",
       "CONSENT_REVOKED",
       "READINESS_PROFILE_EVALUATED",
       "REPORT_GENERATED",
@@ -589,7 +593,7 @@ async function main() {
     const limitedView = await request("GET", `/api/public/verify/${limitedToken}`);
     assert(limitedView.data.business.legalName === undefined && limitedView.data.sharedFields.legalBusinessName === undefined, "unselected legal name leaked");
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
-    assert(getActions(audit.data).includes("ACCESS_GRANT_CREATED") && getActions(audit.data).includes("ACCESS_GRANT_VIEWED"), "guest audit lifecycle missing");
+    assert(getActions(audit.data).includes("GUEST_LINK_CREATED") && getActions(audit.data).includes("GUEST_LINK_OPENED"), "guest audit lifecycle missing");
     pass("AA. MSME creates secure external link and unauthenticated guest sees only allowlisted current scope");
 
     await expectBlocked("GET", "/api/public/verify/not-a-real-token", undefined, ["INVALID_ACCESS_LINK"], "random guest token");

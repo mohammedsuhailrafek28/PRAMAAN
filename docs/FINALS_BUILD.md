@@ -194,6 +194,16 @@ All passwords are `password123`: `msme@pramaan.demo` (Ravi Sharma, Sharma Textil
 
 ## 13. Commit log for finals
 
+## 14. Finals Phase 1 backend contract (Codex)
+
+The registered-consent and guest-link APIs use the same disclosure catalogue. Safe field keys are `legalBusinessName`, `ownerName`, `gstin`, `udyamNumber`, `address`, `turnoverBand`, and `summary`. Explicit evidence keys are `GST_CERTIFICATE`, `UDYAM_CERTIFICATE`, and `BANK_STATEMENT`, labelled respectively Legal business name, Owner name, GSTIN, Udyam number, Business address, Turnover band, Trust summary, GST certificate evidence, Udyam certificate evidence, and Bank statement evidence.
+
+Evidence is explicit. Approving `gstin` or `udyamNumber` does not disclose evidence metadata. Evidence responses omit file paths, original filenames, MIME details, and raw document contents. Requests and approvals use `requestedFields`/`approvedFields` and `requestedEvidenceTypes`/`approvedEvidenceTypes`; approved arrays must be subsets of their corresponding requested arrays.
+
+Consent approvals pin `approvedPassportId` to the exact passport snapshot used for the grant. Trust View and guest links resolve that snapshot, not the latest passport. Reads materialize expired consent/grant state, emit one expiry event, and return `CONSENT_EXPIRED` or `ACCESS_EXPIRED` without reactivating the record. Trust View and guest-open audit events are deduplicated for five minutes.
+
+`NODE_ENV=production` requires an explicit non-default `JWT_SECRET`. Demo seed data is synthetic and deterministic: `npm run demo:reset` creates the three demo credentials above, a verified profile, local fixture paths, a stale bank evidence row, a generated passport, and one pending consent request. No external government verification, LLM, blockchain, lending, marketplace, or scoring service is used.
+
 | Commit | Agent | Summary |
 |---|---|---|
 | `8b9c2e7` | — | Baseline at audit time ("Harden Pramaan release candidate") |

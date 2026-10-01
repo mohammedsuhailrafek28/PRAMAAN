@@ -93,7 +93,7 @@ export async function getMine(userId: string) {
 export async function lookupByGstin(gstin: string) {
   const business = await prisma.business.findUnique({
     where: { gstin: gstin.trim().toUpperCase() },
-    select: { id: true, legalName: true, gstin: true, address: true, trustStatus: true }
+    select: { id: true, legalName: true, gstin: true, trustStatus: true }
   });
   if (!business) throw new ApiError(404, "NOT_FOUND", "Business profile not found.");
   return business;
@@ -157,7 +157,7 @@ export async function uploadDocument(
   await writeAuditLog({
     businessId: business.id,
     actorId: userId,
-    action: AuditAction.DOCUMENT_SUBMITTED,
+    action: previous ? AuditAction.EVIDENCE_REPLACED : AuditAction.EVIDENCE_UPLOADED,
     metadata: {
       documentId: document.id,
       documentType: document.docType,

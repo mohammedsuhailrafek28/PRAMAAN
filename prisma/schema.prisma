@@ -92,11 +92,21 @@ enum AuditAction {
   ACCESS_GRANT_VIEWED
   ACCESS_GRANT_REVOKED
   ACCESS_GRANT_EXPIRED
+  CONSENT_REJECTED
+  CONSENT_EXPIRED
+  TRUST_VIEW_OPENED
+  GUEST_LINK_CREATED
+  GUEST_LINK_OPENED
+  GUEST_LINK_REVOKED
+  GUEST_LINK_EXPIRED
+  EVIDENCE_UPLOADED
+  EVIDENCE_REPLACED
 }
 
 enum AccessGrantStatus {
   ACTIVE
   REVOKED
+  EXPIRED
 }
 
 model User {
@@ -177,6 +187,8 @@ model Passport {
   snapshotJson Json
   generatedAt  DateTime @default(now())
   business     Business @relation(fields: [businessId], references: [id])
+  consentApprovals ConsentRequest[] @relation("ConsentApprovedPassport")
+  accessGrants AccessGrant[] @relation("GrantPassport")
 
   @@unique([businessId, version])
 }
@@ -186,8 +198,11 @@ model ConsentRequest {
   requesterId     String
   businessId      String
   requestedFields Json
+  requestedEvidenceTypes Json @default("[]")
   purpose         String?
   approvedFields  Json?
+  approvedEvidenceTypes Json @default("[]")
+  approvedPassportId String?
   status          ConsentStatus   @default(PENDING)
   durationDays    Int?
   approvedAt      DateTime?
@@ -196,6 +211,7 @@ model ConsentRequest {
   createdAt       DateTime        @default(now())
   requester       User            @relation("RequesterConsents", fields: [requesterId], references: [id])
   business        Business        @relation(fields: [businessId], references: [id])
+  approvedPassport Passport? @relation("ConsentApprovedPassport", fields: [approvedPassportId], references: [id])
   auditLogs       AuditLog[]
   notifications   Notification[]
 }
@@ -210,6 +226,7 @@ model AccessGrant {
   recipientEmail        String?
   purpose               String
   scopeJson             Json
+  passportId            String?
   tokenHash             String           @unique
   status                AccessGrantStatus @default(ACTIVE)
   createdAt             DateTime         @default(now())
@@ -219,6 +236,7 @@ model AccessGrant {
   business              Business         @relation(fields: [businessId], references: [id])
   createdBy             User             @relation("GrantCreator", fields: [createdByUserId], references: [id])
   requester             User?            @relation("GrantRequester", fields: [requesterId], references: [id])
+  passport              Passport?        @relation("GrantPassport", fields: [passportId], references: [id])
   auditLogs             AuditLog[]
 
   @@index([businessId, createdAt])
