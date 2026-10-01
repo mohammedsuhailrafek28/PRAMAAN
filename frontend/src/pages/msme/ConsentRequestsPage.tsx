@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Inbox } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { AlertTriangle, Inbox, Layers } from "lucide-react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -14,38 +15,37 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ConsentRequestCard } from "@/components/shared/ConsentRequestCard";
-import { FieldSelector } from "@/components/shared/FieldSelector";
+import { DisclosureSelector } from "@/components/shared/DisclosureSelector";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { useAppStore } from "@/store/appStore";
 import { useToast } from "@/components/ui/use-toast";
-import { consentFieldBackendKey, getApiError } from "@/services/api";
-import { IMPLIED_EVIDENCE_BY_BACKEND_FIELD, backendFieldLabel, documentTypeLabel } from "@/lib/fieldLabels";
+import { getApiError } from "@/services/api";
+import { backendFieldLabel } from "@/lib/fieldLabels";
+import { EMPTY_SCOPE, scopeSize, type DisclosureScope } from "@/lib/disclosure";
 import {
   CONSENT_DURATION_LABELS,
   type ConsentDurationHours,
-  type ConsentField,
   type ConsentRequest,
 } from "@/types";
 
 const DURATIONS: ConsentDurationHours[] = [24, 168, 720];
 
 export function ConsentRequestsPage() {
-  const { consentRequests, loadConsentRequests, approveConsentRequest, rejectConsentRequest, revokeConsentRequest } =
+  const navigate = useNavigate();
+  const { consentRequests, trustProfile, loadBusiness, loadConsentRequests, approveConsentRequest, rejectConsentRequest, revokeConsentRequest } =
     useAppStore();
   const { toast } = useToast();
 
   const [approving, setApproving] = useState<ConsentRequest | null>(null);
-  const [selectedFields, setSelectedFields] = useState<ConsentField[]>([]);
+  const [selected, setSelected] = useState<DisclosureScope>(EMPTY_SCOPE);
   const [duration, setDuration] = useState<ConsentDurationHours>(168);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     loadConsentRequests();
-  }, [loadConsentRequests]);
-
-  const impliedEvidence = useMemo(
-    () => [...new Set(selectedFields.map((field) => IMPLIED_EVIDENCE_BY_BACKEND_FIELD[consentFieldBackendKey(field)]).filter(Boolean))].map(documentTypeLabel),
-    [selectedFields]
-  );
+    // The approval pins the current Trust Profile version, so show which one.
+    loadBusiness();
+  }, [loadConsentRequests, loadBusiness]);
 
   const pending = useMemo(() => consentRequests.filter((r) => r.status === "pending"), [consentRequests]);
   const active = useMemo(() => consentRequests.filter((r) => r.status === "active"), [consentRequests]);
@@ -56,25 +56,28 @@ export function ConsentRequestsPage() {
 
   function openApprove(request: ConsentRequest) {
     setApproving(request);
-    setSelectedFields(request.requestedFields);
+    setSelected(request.requested);
     setDuration(168);
   }
 
   async function confirmApprove() {
     if (!approving) return;
+    setSubmitting(true);
     try {
-      await approveConsentRequest(approving.id, selectedFields, duration);
-      toast({ title: "Access granted", description: `${approving.requesterName} can now view the selected fields for ${CONSENT_DURATION_LABELS[duration]}.`, variant: "success" });
+      await approveConsentRequest(approving.id, selected, duration);
+      toast({ title: "Access granted", description: `${approving.requesterName} can see ${scopeSize(selected)} item${scopeSize(selected) === 1 ? "" : "s"} for ${CONSENT_DURATION_LABELS[duration]}.`, variant: "success" });
       setApproving(null);
     } catch (e) {
       toast({ title: "Approval failed", description: getApiError(e), variant: "destructive" });
+    } finally {
+      setSubmitting(false);
     }
   }
 
   async function handleReject(request: ConsentRequest) {
     try {
       await rejectConsentRequest(request.id);
-      toast({ title: "Request declined", description: `${request.requesterName}'s request was rejected.` });
+      toast({ title: "Request declined", description: `${request.requesterName}'s request was declined. Nothing was shared.` });
     } catch (e) {
       toast({ title: "Rejection failed", description: getApiError(e), variant: "destructive" });
     }
@@ -83,18 +86,21 @@ export function ConsentRequestsPage() {
   async function handleRevoke(request: ConsentRequest) {
     try {
       await revokeConsentRequest(request.id);
-      toast({ title: "Consent revoked", description: `${request.requesterName} no longer has access to your Trust Profile.`, variant: "warning" });
+      toast({ title: "Consent revoked", description: `${request.requesterName} can no longer open your shared information.`, variant: "warning" });
     } catch (e) {
       toast({ title: "Revocation failed", description: getApiError(e), variant: "destructive" });
     }
   }
+
+  const requestedCount = approving ? scopeSize(approving.requested) : 0;
+  const selectedCount = scopeSize(selected);
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold text-slate-900">Consent Requests</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Review who wants access to your Trust Profile, why, and decide exactly what they can see and for how long.
+          Review who wants access, why, and decide exactly what they can see and for how long.
         </p>
       </div>
 
@@ -125,7 +131,7 @@ export function ConsentRequestsPage() {
 
         <TabsContent value="history" className="space-y-3">
           {history.length === 0 ? (
-            <EmptyState icon={Inbox} title="No history yet" description="Rejected, revoked, and expired requests will appear here." />
+            <EmptyState icon={Inbox} title="No history yet" description="Declined, revoked, and expired requests will appear here." />
           ) : (
             history.map((r) => <ConsentRequestCard key={r.id} request={r} />)
           )}
@@ -137,7 +143,7 @@ export function ConsentRequestsPage() {
           <DialogHeader>
             <DialogTitle>Approve access for {approving?.requesterName}</DialogTitle>
             <DialogDescription>
-              Choose exactly which fields to share and for how long. You can revoke access at any time.
+              You can share some or all of what was requested, never more. You can revoke access at any time.
             </DialogDescription>
           </DialogHeader>
 
@@ -146,28 +152,31 @@ export function ConsentRequestsPage() {
           </div>
 
           <div>
-            <Label className="mb-2 block">Fields to share</Label>
-            <p className="mb-2 text-xs text-muted-foreground">Only fields {approving?.requesterName} requested can be approved. Untick anything you don't want to share.</p>
-            <FieldSelector
-              selected={selectedFields}
-              options={approving?.requestedFields}
-              requestedFields={approving?.requestedFields}
-              onChange={setSelectedFields}
-            />
-            {approving && approving.unsupportedRequestedFields.length > 0 && (
-              <p className="mt-2 text-xs text-warning-foreground">
-                Not shareable and will not be approved: {approving.unsupportedRequestedFields.map(backendFieldLabel).join(", ")}
-              </p>
+            <div className="mb-2 flex items-baseline justify-between gap-2">
+              <Label>What to share</Label>
+              <span className="text-xs font-medium text-slate-600" aria-live="polite">
+                Sharing {selectedCount} of {requestedCount} requested
+              </span>
+            </div>
+            {approving && (
+              <DisclosureSelector
+                idPrefix="approve"
+                value={selected}
+                onChange={setSelected}
+                options={approving.requested}
+                requested={approving.requested}
+              />
             )}
-            {impliedEvidence.length > 0 && (
-              <p className="mt-2 rounded-md border border-border px-3 py-2 text-xs text-slate-600">
-                These fields also share details of your current {impliedEvidence.join(", ")} (type, file name, check status, dates, source). Document files are never shared.
+            <p className="mt-2 text-xs text-muted-foreground">Only items {approving?.requesterName} asked for are listed. Anything they didn't request can't be added here.</p>
+            {approving && approving.unsupportedRequested.length > 0 && (
+              <p className="mt-1 text-xs text-warning-foreground">
+                Not shareable through Pramaan and will not be approved: {approving.unsupportedRequested.map(backendFieldLabel).join(", ")}
               </p>
             )}
           </div>
 
           <div>
-            <Label className="mb-2 block">Consent duration</Label>
+            <Label className="mb-2 block">Access period</Label>
             <RadioGroup
               value={String(duration)}
               onValueChange={(v) => setDuration(Number(v) as ConsentDurationHours)}
@@ -185,13 +194,29 @@ export function ConsentRequestsPage() {
             </RadioGroup>
           </div>
 
+          {trustProfile ? (
+            <p className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-xs text-slate-600">
+              <Layers className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              Values and evidence will come from Trust Profile v{trustProfile.version}, fixed at approval. Later changes are not shared under this consent.
+            </p>
+          ) : (
+            <p role="alert" className="flex items-start gap-2 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-xs text-warning-foreground">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              Generate your Trust Profile before approving. Verifiers are shown a fixed version of it.
+            </p>
+          )}
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setApproving(null)}>
               Cancel
             </Button>
-            <Button onClick={confirmApprove} disabled={selectedFields.length === 0}>
-              Approve
-            </Button>
+            {trustProfile ? (
+              <Button onClick={confirmApprove} disabled={selectedCount === 0 || submitting}>
+                {submitting ? "Approving…" : `Approve ${selectedCount} item${selectedCount === 1 ? "" : "s"}`}
+              </Button>
+            ) : (
+              <Button onClick={() => navigate("/msme/trust-profile")}>Go to Trust Profile</Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

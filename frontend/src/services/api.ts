@@ -1,11 +1,12 @@
 import axios from "axios";
 import type {
-  AuditActor, AuditLogEntry, Business, BusinessDocument, ConsentDurationHours, ConsentField,
+  AuditActor, AuditLogEntry, Business, BusinessDocument, ConsentDurationHours,
   ConsentRequest, Contradiction, CrossCheckResult, DocumentCheck, EvidenceGap, FieldCheck,
   Notification, Role, TrustProfile, TrustViewResult, User, EvidenceStatus, TrustSummary,
-  AccessGrant, GuestVerificationView, ShareableField, ShareableEvidenceType, SharedEvidence,
+  AccessGrant, GuestLinkFailure, GuestVerificationView, SharedEvidence,
 } from "@/types";
 import { formatSharedFields } from "@/lib/sharedFields";
+import { parseScope, type DisclosureScope } from "@/lib/disclosure";
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:4000/api").replace(/\/$/, "");
 const client = axios.create({ baseURL: API_URL, timeout: 15000 });
@@ -21,8 +22,30 @@ client.interceptors.response.use((response) => response, (error) => {
   return Promise.reject(error);
 });
 
+/** User-facing copy for backend error codes; backend message strings are never shown for these. */
+const FRIENDLY_ERRORS: Record<string, string> = {
+  PROFILE_NOT_READY: "Generate your Trust Profile first. Verifiers are shown a pinned version of it, so one must exist before access can be shared.",
+  CONSENT_REVOKED: "The business has revoked this access.",
+  CONSENT_EXPIRED: "This access period has ended.",
+  ACCESS_REVOKED: "The business has revoked this link.",
+  ACCESS_EXPIRED: "This link has expired.",
+  INVALID_ACCESS_LINK: "This link is not valid.",
+  PROFILE_SNAPSHOT_UNAVAILABLE: "The shared Trust Profile version is no longer available.",
+  CONFLICT: "This request has already been handled. Refresh to see its current state.",
+  RATE_LIMITED: "Too many requests. Please wait a moment and try again.",
+  INTERNAL_SERVER_ERROR: "Something went wrong on our side. Please try again.",
+};
+
+export function getApiErrorCode(error: unknown): string | undefined {
+  return axios.isAxiosError(error) ? error.response?.data?.error?.code : undefined;
+}
+
 export function getApiError(error: unknown): string {
-  if (axios.isAxiosError(error)) return error.response?.data?.error?.message || error.message;
+  if (axios.isAxiosError(error)) {
+    if (!error.response) return "Can't reach Pramaan right now. Check your connection and try again.";
+    const code = error.response.data?.error?.code;
+    return (code && FRIENDLY_ERRORS[code]) || error.response.data?.error?.message || "Something went wrong. Please try again.";
+  }
   return error instanceof Error ? error.message : "Something went wrong.";
 }
 
@@ -31,20 +54,6 @@ const roleFromApi: Record<string, Role> = { MSME: "msme", BUYER: "buyer", BANK: 
 const statusFromApi: Record<string, ConsentRequest["status"]> = {
   PENDING: "pending", APPROVED: "active", REJECTED: "rejected", REVOKED: "revoked", EXPIRED: "expired",
 };
-const fieldToApi: Record<ConsentField, string> = {
-  legalName: "legalBusinessName", gstin: "gstin", udyamNumber: "udyamNumber", address: "address",
-  complianceStatus: "summary", turnoverBand: "turnoverBand", bankVerificationStatus: "documentConfidence",
-};
-const fieldFromApi: Record<string, ConsentField> = {
-  legalBusinessName: "legalName", gstin: "gstin", udyamNumber: "udyamNumber", address: "address",
-  summary: "complianceStatus", turnoverBand: "turnoverBand", documentConfidence: "bankVerificationStatus",
-};
-
-/** Backend key behind a UI consent field (used to explain current disclosure behaviour). */
-export function consentFieldBackendKey(field: ConsentField): string {
-  return fieldToApi[field];
-}
-
 function mapUser(raw: any): User {
   const name = raw.name || "Pramaan user";
   return { id: raw.id, role: roleFromApi[raw.role] || raw.role, name, orgName: raw.organizationName, email: raw.email, avatarInitials: name.split(" ").map((part: string) => part[0]).join("").slice(0, 2).toUpperCase() };
@@ -97,26 +106,28 @@ function mapContradictions(raw: any[] | undefined): Contradiction[] {
 }
 
 function mapConsent(raw: any): ConsentRequest {
-  const requestedRaw: string[] = Array.isArray(raw.requestedFields) ? raw.requestedFields.map(String) : [];
-  const requested = requestedRaw.filter((field) => fieldFromApi[field]).map((field) => fieldFromApi[field]);
-  const unsupported = requestedRaw.filter((field) => !fieldFromApi[field]);
-  const approved = (Array.isArray(raw.approvedFields) ? raw.approvedFields.map(String) : []).filter((field: string) => fieldFromApi[field]).map((field: string) => fieldFromApi[field]);
+  const requested = parseScope(raw.requestedFields, raw.requestedEvidenceTypes);
+  const approved = parseScope(raw.approvedFields, raw.approvedEvidenceTypes);
   let status = statusFromApi[raw.status] || "pending";
-  // The backend only flips APPROVED -> EXPIRED lazily; never show lapsed access as live.
+  // Defensive: the backend materialises expiry on read, but never show lapsed access as live.
   if (status === "active" && raw.expiresAt && new Date(raw.expiresAt).getTime() <= Date.now()) status = "expired";
   return {
-    id: raw.id, businessId: raw.businessId,
+    id: raw.id, businessId: raw.businessId ?? raw.business?.id,
     // Only identity the verifier already sees via GSTIN lookup; nothing else is read from `raw.business`.
     businessName: raw.business?.legalName || undefined,
     businessGstin: raw.business?.gstin || undefined,
-    requesterId: raw.requesterId,
+    requesterId: raw.requesterId ?? raw.requester?.id,
     requesterName: raw.requester?.organizationName || raw.requester?.name || "Verifier",
     requesterRole: roleFromApi[raw.requester?.role] as ConsentRequest["requesterRole"],
     purpose: raw.purpose || undefined,
-    requestedFields: requested, unsupportedRequestedFields: unsupported, approvedFields: approved,
+    requested: requested.scope, approved: approved.scope, unsupportedRequested: requested.unsupported,
     durationDays: typeof raw.durationDays === "number" ? raw.durationDays : null,
     status, requestedAt: raw.createdAt || raw.requestedAt, approvedAt: raw.approvedAt || undefined, expiresAt: raw.expiresAt || undefined, revokedAt: raw.revokedAt || undefined,
   };
+}
+
+function mapGrant(raw: any): AccessGrant {
+  return { ...raw, scope: parseScope(raw.scope?.fields, raw.scope?.evidenceTypes).scope };
 }
 
 function mapTrustProfile(snapshot: any, fallbackId?: string): TrustProfile {
@@ -135,8 +146,8 @@ function mapTrustProfile(snapshot: any, fallbackId?: string): TrustProfile {
 
 function mapSharedEvidence(raw: any[] | undefined): SharedEvidence[] {
   return (raw || []).map((doc) => ({
-    docType: doc.docType, evidenceStatus: doc.evidenceStatus, confidence: doc.confidence, confidenceReason: doc.confidenceReason,
-    source: doc.source, issuedAt: doc.issuedAt, checkedAt: doc.checkedAt, expiresAt: doc.expiresAt, uploadedAt: doc.uploadedAt, lifecycle: doc.lifecycle,
+    docType: doc.docType, evidenceStatus: doc.evidenceStatus, confidence: doc.confidence,
+    source: doc.source, issuedAt: doc.issuedAt, checkedAt: doc.checkedAt, expiresAt: doc.expiresAt, uploadedAt: doc.uploadedAt, lifecycle: doc.lifecycle || undefined,
   }));
 }
 
@@ -157,7 +168,7 @@ export async function register(input: { name: string; orgName: string; email: st
 }
 
 export async function getBusiness(): Promise<Business> { const { data } = await client.get("/business/me"); return mapBusiness(data.business); }
-export async function lookupBusiness(gstin: string): Promise<{ id: string; legalName: string; gstin: string; address: string; trustStatus: EvidenceStatus }> {
+export async function lookupBusiness(gstin: string): Promise<{ id: string; legalName: string; gstin: string; trustStatus: EvidenceStatus }> {
   const { data } = await client.get(`/business/lookup/${encodeURIComponent(gstin.trim().toUpperCase())}`);
   return data.business;
 }
@@ -203,13 +214,15 @@ export async function crossCheckBusiness(): Promise<{ business: Business; result
   return { business: await getBusiness(), result };
 }
 
-export async function createConsentRequest(input: { lookup: string; requestedFields: ConsentField[]; purpose?: string }): Promise<ConsentRequest> {
-  const { data } = await client.post("/consent-requests", { businessGstin: input.lookup, purpose: input.purpose, requestedFields: input.requestedFields.map((field) => fieldToApi[field]) });
+const toApiScope = (scope: DisclosureScope) => ({ fields: scope.fields, evidenceTypes: scope.evidence });
+
+export async function createConsentRequest(input: { lookup: string; scope: DisclosureScope; purpose?: string }): Promise<ConsentRequest> {
+  const { data } = await client.post("/consent-requests", { businessGstin: input.lookup, purpose: input.purpose, requestedFields: input.scope.fields, requestedEvidenceTypes: input.scope.evidence });
   return mapConsent(data.consent);
 }
 export async function getIncomingRequests(): Promise<ConsentRequest[]> { const { data } = await client.get("/consent-requests", { params: { scope: "incoming" } }); return data.requests.map(mapConsent); }
 export async function getOutgoingRequests(): Promise<ConsentRequest[]> { const { data } = await client.get("/consent-requests", { params: { scope: "outgoing" } }); return data.requests.map(mapConsent); }
-export async function approveConsentRequest(id: string, fields: ConsentField[], duration: ConsentDurationHours): Promise<ConsentRequest> { const { data } = await client.patch(`/consent-requests/${id}/approve`, { approvedFields: fields.map((field) => fieldToApi[field]), durationDays: duration / 24 }); return mapConsent(data.consent); }
+export async function approveConsentRequest(id: string, scope: DisclosureScope, duration: ConsentDurationHours): Promise<ConsentRequest> { const { data } = await client.patch(`/consent-requests/${id}/approve`, { approvedFields: scope.fields, approvedEvidenceTypes: scope.evidence, durationDays: duration / 24 }); return mapConsent(data.consent); }
 export async function rejectConsentRequest(id: string): Promise<ConsentRequest> { const { data } = await client.patch(`/consent-requests/${id}/reject`); return mapConsent(data.consent); }
 export async function revokeConsentRequest(id: string): Promise<ConsentRequest> { const { data } = await client.patch(`/consent-requests/${id}/revoke`); return mapConsent(data.consent); }
 
@@ -220,11 +233,19 @@ export async function getTrustView(consentId: string): Promise<TrustViewResult> 
     const name = fields.find((field) => field.key === "legalBusinessName")?.value;
     return {
       state: "active", consentId, businessName: name || "Shared business information",
-      grantedAt: data.metadata.accessGrantedAt, expiresAt: data.metadata.expiresAt, viewedAt: data.metadata.viewedAt, purpose: data.metadata.purpose || undefined,
+      grantedAt: data.metadata.accessGrantedAt, expiresAt: data.metadata.expiresAt, purpose: data.metadata.purpose || undefined,
+      profileVersion: typeof data.metadata.passportVersion === "number" ? data.metadata.passportVersion : undefined,
       fields, evidence: mapSharedEvidence(data.evidence),
     };
   } catch (error) {
-    if (axios.isAxiosError(error)) { const code = error.response?.data?.error?.code; if (code === "CONSENT_REVOKED") return { state: "revoked", consentId }; if (code === "CONSENT_EXPIRED") return { state: "expired", consentId }; if (error.response?.status === 404) return { state: "not_found", consentId }; }
+    if (axios.isAxiosError(error) && error.response) {
+      const code = getApiErrorCode(error);
+      if (code === "CONSENT_REVOKED") return { state: "revoked", consentId };
+      if (code === "CONSENT_EXPIRED") return { state: "expired", consentId };
+      if (code === "PROFILE_NOT_READY") return { state: "unavailable", consentId, message: "The business's Trust Profile for this consent isn't available yet." };
+      if (error.response.status === 403) return { state: "unavailable", consentId, message: "This request hasn't been approved, or it isn't yours to open." };
+      if (error.response.status === 404) return { state: "not_found", consentId };
+    }
     throw error;
   }
 }
@@ -245,13 +266,25 @@ export async function getAuditLogs(): Promise<AuditLogEntry[]> {
 export async function getNotifications(): Promise<Notification[]> { const { data } = await client.get("/notifications"); return data.notifications.map((raw: any) => ({ id: raw.id, userId: raw.userId, message: raw.message, read: raw.readFlag, createdAt: raw.createdAt, relatedConsentId: raw.relatedConsentId })); }
 export async function markNotificationRead(id: string): Promise<void> { await client.patch(`/notifications/${id}/read`); }
 
-export async function createAccessGrant(input: { recipientName?: string; recipientOrganization?: string; recipientEmail?: string; purpose: string; scope: { fields: ShareableField[]; evidenceTypes: ShareableEvidenceType[] }; durationHours?: number; expiresAt?: string }): Promise<AccessGrant> {
-  const { data } = await client.post("/access-grants", input);
-  return data.grant;
+export async function createAccessGrant(input: { recipientName?: string; recipientOrganization?: string; recipientEmail?: string; purpose: string; scope: DisclosureScope; durationHours?: number; expiresAt?: string }): Promise<AccessGrant> {
+  const { data } = await client.post("/access-grants", { ...input, scope: toApiScope(input.scope) });
+  return mapGrant(data.grant);
 }
-export async function getAccessGrants(): Promise<AccessGrant[]> { const { data } = await client.get("/access-grants"); return data.grants; }
-export async function revokeAccessGrant(id: string): Promise<AccessGrant> { const { data } = await client.patch(`/access-grants/${id}/revoke`); return data.grant; }
-export async function getGuestVerification(token: string): Promise<GuestVerificationView> {
-  const { data } = await axios.get(`${API_URL}/public/verify/${encodeURIComponent(token)}`, { timeout: 15000 });
-  return { grant: data.grant, business: data.business || {}, fields: formatSharedFields(data.sharedFields), evidence: mapSharedEvidence(data.evidence) };
+export async function getAccessGrants(): Promise<AccessGrant[]> { const { data } = await client.get("/access-grants"); return data.grants.map(mapGrant); }
+export async function revokeAccessGrant(id: string): Promise<AccessGrant> { const { data } = await client.patch(`/access-grants/${id}/revoke`); return mapGrant(data.grant); }
+
+const GUEST_FAILURES: Record<string, GuestLinkFailure> = {
+  ACCESS_REVOKED: "revoked", ACCESS_EXPIRED: "expired", INVALID_ACCESS_LINK: "invalid", PROFILE_SNAPSHOT_UNAVAILABLE: "unavailable",
+};
+
+export async function getGuestVerification(token: string): Promise<{ view: GuestVerificationView } | { failure: GuestLinkFailure }> {
+  try {
+    const { data } = await axios.get(`${API_URL}/public/verify/${encodeURIComponent(token)}`, { timeout: 15000 });
+    return { view: { grant: data.grant, business: data.business || {}, fields: formatSharedFields(data.sharedFields), evidence: mapSharedEvidence(data.evidence) } };
+  } catch (error) {
+    const code = getApiErrorCode(error);
+    if (code && GUEST_FAILURES[code]) return { failure: GUEST_FAILURES[code] };
+    if (axios.isAxiosError(error) && error.response?.status === 404) return { failure: "invalid" };
+    throw error;
+  }
 }

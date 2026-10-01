@@ -2,6 +2,8 @@
 // for Indian MSMEs. The services layer (src/services/api.ts) maps backend
 // responses into these shapes; pages never read raw API payloads.
 
+import type { DisclosureScope } from "@/lib/disclosure";
+
 export type Role = "msme" | "buyer" | "bank";
 
 export interface User {
@@ -144,32 +146,6 @@ export interface TrustProfile {
   sourceVerificationPerformed: false;
 }
 
-/** The set of fields a stakeholder can request / be granted consent for. */
-export type ConsentField =
-  | "legalName"
-  | "gstin"
-  | "udyamNumber"
-  | "address"
-  | "complianceStatus"
-  | "turnoverBand"
-  | "bankVerificationStatus";
-
-/**
- * Labels describe what the backend actually discloses for each key today.
- * `complianceStatus` -> backend `summary` (trust readiness metrics) and
- * `bankVerificationStatus` -> backend `documentConfidence` (check results for
- * every document). Pending the canonical disclosure contract (D3).
- */
-export const CONSENT_FIELD_LABELS: Record<ConsentField, string> = {
-  legalName: "Legal business name",
-  gstin: "GSTIN",
-  udyamNumber: "Udyam number",
-  address: "Registered address",
-  complianceStatus: "Trust readiness summary",
-  turnoverBand: "Turnover band",
-  bankVerificationStatus: "Evidence check results (all documents)",
-};
-
 export type ConsentDurationHours = 24 | 168 | 720; // 24h / 7d / 30d
 
 export const CONSENT_DURATION_LABELS: Record<ConsentDurationHours, string> = {
@@ -190,10 +166,10 @@ export interface ConsentRequest {
   requesterName: string;
   requesterRole?: Extract<Role, "buyer" | "bank">;
   purpose?: string;
-  requestedFields: ConsentField[];
-  /** Requested backend keys the UI does not recognise; never approvable here. */
-  unsupportedRequestedFields: string[];
-  approvedFields: ConsentField[];
+  requested: DisclosureScope;
+  approved: DisclosureScope;
+  /** Requested keys outside the canonical catalogue (pre-contract records); never approvable. */
+  unsupportedRequested: string[];
   durationDays: number | null;
   status: ConsentStatus;
   requestedAt: string;
@@ -230,8 +206,6 @@ export interface Notification {
   relatedConsentId?: string;
 }
 
-export type ShareableField = "legalBusinessName" | "ownerName" | "gstin" | "udyamNumber" | "address" | "turnoverBand" | "summary";
-export type ShareableEvidenceType = "GST_CERTIFICATE" | "UDYAM_CERTIFICATE" | "BANK_STATEMENT";
 
 export interface AccessGrant {
   id: string;
@@ -239,7 +213,7 @@ export interface AccessGrant {
   recipientOrganization?: string;
   recipientEmail?: string;
   purpose: string;
-  scope: { fields: ShareableField[]; evidenceTypes: ShareableEvidenceType[] };
+  scope: DisclosureScope;
   createdAt: string;
   expiresAt: string;
   revokedAt?: string;
@@ -248,11 +222,11 @@ export interface AccessGrant {
   secureUrl?: string;
 }
 
+/** Evidence metadata disclosed under consent or a guest link (never the file). */
 export interface SharedEvidence {
   docType: string;
   evidenceStatus: string;
   confidence: number;
-  confidenceReason?: string;
   source?: string;
   issuedAt?: string;
   checkedAt?: string;
@@ -287,11 +261,17 @@ export type TrustViewResult =
       businessName: string;
       grantedAt?: string;
       expiresAt: string;
-      viewedAt?: string;
       purpose?: string;
+      /** Version of the Trust Profile snapshot pinned when consent was approved. */
+      profileVersion?: number;
       fields: SharedField[];
       evidence: SharedEvidence[];
     }
   | { state: "revoked"; consentId: string }
   | { state: "expired"; consentId: string }
-  | { state: "not_found"; consentId: string };
+  | { state: "not_found"; consentId: string }
+  /** Consent exists but cannot be shown (not approved yet, or its pinned snapshot is missing). */
+  | { state: "unavailable"; consentId: string; message: string };
+
+/** Why a guest link cannot be opened. */
+export type GuestLinkFailure = "revoked" | "expired" | "invalid" | "unavailable";

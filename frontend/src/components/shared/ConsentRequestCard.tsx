@@ -3,8 +3,10 @@ import { AlertTriangle, Building2, Landmark } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/shared/StatusPill";
+import { DisclosureChips } from "@/components/shared/DisclosureChips";
 import { backendFieldLabel } from "@/lib/fieldLabels";
-import { CONSENT_FIELD_LABELS, type ConsentRequest } from "@/types";
+import { scopeSize, withheldScope } from "@/lib/disclosure";
+import type { ConsentRequest } from "@/types";
 import { formatDateTime, formatDurationDays, timeUntil } from "@/lib/utils";
 
 const CONSENT_STATUS_PILL = {
@@ -22,25 +24,10 @@ interface ConsentRequestCardProps {
   onRevoke?: () => void;
 }
 
-function FieldChips({ fields, muted = false }: { fields: string[]; muted?: boolean }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {fields.map((label) => (
-        <span key={label} className={`rounded-full border border-border px-2.5 py-1 text-xs ${muted ? "bg-white text-slate-400 line-through" : "bg-surface text-slate-600"}`}>
-          {label}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 export function ConsentRequestCard({ request, onApprove, onReject, onRevoke }: ConsentRequestCardProps) {
   const RoleIcon = request.requesterRole === "bank" ? Landmark : Building2;
   const status = CONSENT_STATUS_PILL[request.status];
-  const requestedLabels = request.requestedFields.map((field) => CONSENT_FIELD_LABELS[field]);
-  const approvedLabels = request.approvedFields.map((field) => CONSENT_FIELD_LABELS[field]);
-  const notApproved = request.requestedFields.filter((field) => !request.approvedFields.includes(field)).map((field) => CONSENT_FIELD_LABELS[field]);
-  const decided = request.status !== "pending" && request.status !== "rejected";
+  const decided = request.status === "active" || request.status === "revoked" || request.status === "expired";
 
   return (
     <Card>
@@ -64,20 +51,19 @@ export function ConsentRequestCard({ request, onApprove, onReject, onRevoke }: C
         <div className="mt-4 space-y-2">
           {decided ? (
             <>
-              <p className="text-xs font-medium text-slate-600">Approved ({approvedLabels.length} of {requestedLabels.length} requested)</p>
-              <FieldChips fields={approvedLabels} />
-              {notApproved.length > 0 && <FieldChips fields={notApproved} muted />}
+              <p className="text-xs font-medium text-slate-600">Shared {scopeSize(request.approved)} of {scopeSize(request.requested)} requested items</p>
+              <DisclosureChips scope={request.approved} withheld={withheldScope(request.requested, request.approved)} />
             </>
           ) : (
             <>
-              <p className="text-xs font-medium text-slate-600">Requested fields</p>
-              <FieldChips fields={requestedLabels} />
+              <p className="text-xs font-medium text-slate-600">Requested ({scopeSize(request.requested)} items)</p>
+              <DisclosureChips scope={request.requested} />
             </>
           )}
-          {request.unsupportedRequestedFields.length > 0 && (
+          {request.unsupportedRequested.length > 0 && (
             <p className="flex items-start gap-1.5 text-xs text-warning-foreground">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-              Also requested, but not shareable from this screen: {request.unsupportedRequestedFields.map(backendFieldLabel).join(", ")}
+              Also requested, but not shareable through Pramaan: {request.unsupportedRequested.map(backendFieldLabel).join(", ")}
             </p>
           )}
         </div>
@@ -87,8 +73,8 @@ export function ConsentRequestCard({ request, onApprove, onReject, onRevoke }: C
             {request.status === "pending" && "Nothing is shared until you approve."}
             {request.status === "active" && `${formatDurationDays(request.durationDays)} access · expires ${formatDateTime(request.expiresAt)} (${timeUntil(request.expiresAt)})`}
             {request.status === "rejected" && "You declined this request. Nothing was shared."}
-            {request.status === "revoked" && `Revoked ${formatDateTime(request.revokedAt)}`}
-            {request.status === "expired" && `Expired ${formatDateTime(request.expiresAt)}`}
+            {request.status === "revoked" && `Revoked ${formatDateTime(request.revokedAt)}. The verifier can no longer open it.`}
+            {request.status === "expired" && `Expired ${formatDateTime(request.expiresAt)}. The verifier can no longer open it.`}
           </div>
 
           <div className="flex gap-2">
@@ -97,7 +83,7 @@ export function ConsentRequestCard({ request, onApprove, onReject, onRevoke }: C
                 <Button size="sm" variant="outline" onClick={onReject}>
                   Reject
                 </Button>
-                <Button size="sm" onClick={onApprove}>
+                <Button size="sm" onClick={onApprove} disabled={scopeSize(request.requested) === 0}>
                   Review &amp; approve
                 </Button>
               </>

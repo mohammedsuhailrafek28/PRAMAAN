@@ -1,11 +1,11 @@
 import { create } from "zustand";
 
 import * as api from "@/services/api";
+import type { DisclosureScope } from "@/lib/disclosure";
 import type {
   AuditLogEntry,
   Business,
   ConsentDurationHours,
-  ConsentField,
   ConsentRequest,
   CrossCheckResult,
   Notification,
@@ -30,7 +30,7 @@ interface AppState {
   generateTrustProfile: () => Promise<void>;
 
   loadConsentRequests: () => Promise<void>;
-  approveConsentRequest: (id: string, fields: ConsentField[], duration: ConsentDurationHours) => Promise<void>;
+  approveConsentRequest: (id: string, scope: DisclosureScope, duration: ConsentDurationHours) => Promise<void>;
   rejectConsentRequest: (id: string) => Promise<void>;
   revokeConsentRequest: (id: string) => Promise<void>;
 
@@ -99,8 +99,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     catch (error) { set({ error: api.getApiError(error) }); }
   },
 
-  approveConsentRequest: async (id, fields, duration) => {
-    await api.approveConsentRequest(id, fields, duration);
+  approveConsentRequest: async (id, scope, duration) => {
+    await api.approveConsentRequest(id, scope, duration);
     await get().loadConsentRequests();
     await get().loadAuditLogs();
   },
