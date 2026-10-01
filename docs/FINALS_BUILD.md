@@ -197,3 +197,25 @@ All passwords are `password123`: `msme@pramaan.demo` (Ravi Sharma, Sharma Textil
 | Commit | Agent | Summary |
 |---|---|---|
 | `8b9c2e7` | — | Baseline at audit time ("Harden Pramaan release candidate") |
+
+## 15. Frontend Phase 0–1 handoff (Claude)
+
+**Commits on `finals/main`:** `0b9017c` audit doc · `3601fa6` verbatim frontend import into `frontend/` (same build asset hashes as the Downloads copy) · `d2a9a6e` lint gate green · `7f3640c` shared navigation + mobile drawer · `5748b6a` frontend correctness pass.
+
+**Validated against the committed backend** (isolated worktree, scratch DB copy, not Codex's in-progress tree): 32/32 headless-browser checks across MSME login → dashboard → evidence upload → cross-check → Trust Profile; verifier request → case list → Trust View; MSME approve (requested-only) / reject / revoke → Activity; 390px mobile nav. Frontend `tsc`, `eslint --max-warnings 0` and `vite build` pass at every commit.
+
+**What the frontend now assumes (please keep stable or tell me):**
+- `GET /consent-requests?scope=outgoing` → the UI reads only `business.legalName` and `business.gstin` (the same identity GSTIN lookup already returns). Shaping the response to exactly those (S1) needs no frontend change.
+- `POST /business/cross-check` → `{ trustStatus, profile: { lastCalculatedAt, summary, fieldConfidence[], documentConfidence[], gaps[], contradictions[], limitations[] } }` is rendered directly as the cross-check result.
+- Passport snapshot keys `fieldConfidence`, `documentConfidence`, `gaps`, `contradictions`, `summary`, `version`, `generatedAt` drive the Trust Card.
+- Audit: `frontend/src/lib/auditEvents.ts` maps every current `AuditAction` plus `CONSENT_REJECTED` / `CONSENT_EXPIRED`; unknown actions render humanized. **Codex: please publish the canonical action list here** and I'll trim the legacy aliases. The UI credits expiry events to "Pramaan (automatic)" and guest-link opens to "Link recipient". If you record a system actor, tell me the shape.
+
+**Blocked on the disclosure contract (§14 draft, not yet committed) — next frontend phase:**
+1. Replace UI consent keys `complianceStatus`→`summary` and `bankVerificationStatus`→`documentConfidence` with the catalogue keys/labels; drop `documentConfidence` from the request form.
+2. Add explicit evidence selection to request and approval (`requestedEvidenceTypes` / `approvedEvidenceTypes`).
+3. **Remove** the approve-dialog note "these fields also share details of your current GST/Udyam certificate…" (`IMPLIED_EVIDENCE_BY_BACKEND_FIELD` in `frontend/src/lib/fieldLabels.ts`). It is true for the committed backend and becomes false the moment §14 lands. Codex: please flag in your commit message when that behaviour changes.
+4. Trust View / guest link: show the pinned snapshot version (`approvedPassportId`) and handle `ACCESS_EXPIRED`.
+
+**Nice-to-have API additions (P1, not blocking):** `rejectedAt` on consent requests (history currently shows "declined" without a time); a `GET` for the latest cross-check result so field-level results survive a page reload; `GET /audit-logs` for verifiers (their own requests/views).
+
+**Still incomplete or potentially misleading in the UI:** readiness and report features have no screens; Evidence Vault has no per-type "missing" slots and no way to open your own file; the verifier has no audit view; the Access (guest-link) page still uses its own field vocabulary until the catalogue lands.
