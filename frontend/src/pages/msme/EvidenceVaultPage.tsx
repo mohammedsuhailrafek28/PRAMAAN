@@ -14,6 +14,7 @@ import { EvidenceBadges, LifecycleBadge } from "@/components/shared/EvidenceStat
 import { ROUTES } from "@/components/layout/navigation";
 import { useAppStore } from "@/store/appStore";
 import { getApiError } from "@/services/api";
+import { isStaleSession } from "@/services/sessionEpoch";
 import { useToast } from "@/components/ui/use-toast";
 import { evidenceHealth, evidenceSlots, isTrustProfileOutdated, type EvidenceSlot } from "@/lib/evidenceSlots";
 import { sourceLabel } from "@/lib/fieldLabels";
@@ -130,6 +131,7 @@ function UploadDialog({ slot, onClose }: { slot: EvidenceSlot | null; onClose: (
       toast({ title: `${slot.label} ${slot.current ? "replaced" : "uploaded"}`, description: "Pramaan re-ran its internal cross-check with the new version.", variant: "success" });
       onClose();
     } catch (e) {
+      if (isStaleSession(e)) return;
       setProblem(getApiError(e));
     } finally { setSaving(false); }
   }

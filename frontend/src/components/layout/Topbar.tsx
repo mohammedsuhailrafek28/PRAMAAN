@@ -34,7 +34,7 @@ export function Topbar() {
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   function openNotification(notification: Notification) {
-    void markNotificationRead(notification.id);
+    markNotificationRead(notification.id).catch(() => undefined); // best effort; the bell is already updated on next load
     setBellOpen(false);
     if (!notification.relatedConsentId || !currentUser) return;
     navigate(currentUser.role === "msme" ? ROUTES.consent : `/trust-view/${notification.relatedConsentId}`);

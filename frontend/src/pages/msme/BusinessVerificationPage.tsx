@@ -19,6 +19,7 @@ import { gstinSchema, panSchema, udyamSchema } from "@/lib/identifiers";
 import { backendFieldLabel, documentTypeLabel } from "@/lib/fieldLabels";
 import { NOT_EXTERNALLY_VERIFIED, describeEvidenceStatus } from "@/lib/trustVocabulary";
 import { getApiError } from "@/services/api";
+import { isStaleSession } from "@/services/sessionEpoch";
 import { useToast } from "@/components/ui/use-toast";
 
 const schema = z.object({
@@ -147,6 +148,7 @@ export function BusinessVerificationPage() {
       const result = await crossCheckBusiness();
       toast({ title: "Internal cross-check complete", description: `Overall result: ${describeEvidenceStatus(result.trustStatus).label}.` });
     } catch (error) {
+      if (isStaleSession(error)) return; // the user signed out or switched; show nothing
       toast({ title: "Cross-check could not be completed", description: getApiError(error), variant: "destructive" });
     } finally { setRunning(false); }
   }

@@ -8,6 +8,7 @@ import { SectionCard } from "@/components/shared/SectionCard";
 import { DisclosureSelector } from "@/components/shared/DisclosureSelector";
 import { EVIDENCE_KEYS, scopeSize, type DisclosureScope, type EvidenceKey } from "@/lib/disclosure";
 import { createAccessGrant, getApiError } from "@/services/api";
+import { captureSession } from "@/services/sessionEpoch";
 import { formatDateTime } from "@/lib/utils";
 import type { AccessGrant, Business, TrustProfile } from "@/types";
 
@@ -36,11 +37,12 @@ export function SecureLinkForm({ business, trustProfile, onCreated }: { business
   async function create() {
     if (scopeSize(scope) === 0) { setError("Select at least one item to share."); return; }
     setBusy(true); setError(null); setCopied(false);
+    const session = captureSession();
     try {
-      const grant = await createAccessGrant({ recipientName: recipientName || undefined, recipientOrganization: recipientOrganization || undefined, recipientEmail: recipientEmail || undefined, purpose, scope, durationHours: Number(duration) });
+      const grant = await session.run(createAccessGrant({ recipientName: recipientName || undefined, recipientOrganization: recipientOrganization || undefined, recipientEmail: recipientEmail || undefined, purpose, scope, durationHours: Number(duration) }));
       setCreated(grant);
       onCreated(grant);
-    } catch (e) { setError(getApiError(e)); } finally { setBusy(false); }
+    } catch (e) { if (session.isCurrent()) setError(getApiError(e)); } finally { setBusy(false); }
   }
 
   async function copy() {

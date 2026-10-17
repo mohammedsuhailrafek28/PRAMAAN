@@ -10,7 +10,7 @@ import { formatSharedFields } from "@/lib/sharedFields";
 import { parseScope, type DisclosureScope } from "@/lib/disclosure";
 import { TOKEN_KEY, isSessionExpiry, notifyUnauthorized } from "@/services/session";
 
-const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:4000/api").replace(/\/$/, "");
+const API_URL = (import.meta.env?.VITE_API_URL || "http://localhost:4000/api").replace(/\/$/, "");
 const client = axios.create({ baseURL: API_URL, timeout: 15000 });
 
 client.interceptors.request.use((config) => {
@@ -200,11 +200,11 @@ export async function uploadBusinessDocument(docType: BusinessDocument["type"], 
   await client.post("/business/documents", form);
 }
 
-/** Runs the internal cross-check and returns the engine's own result plus the refreshed business. */
-export async function crossCheckBusiness(): Promise<{ business: Business; result: CrossCheckResult }> {
+/** Runs the internal cross-check and returns the engine's own result. Callers refresh the business themselves. */
+export async function crossCheckBusiness(): Promise<CrossCheckResult> {
   const { data } = await client.post("/business/cross-check");
   const profile = data.profile || {};
-  const result: CrossCheckResult = {
+  return {
     trustStatus: data.trustStatus,
     checkedAt: profile.lastCalculatedAt,
     summary: (profile.summary || {}) as TrustSummary,
@@ -214,7 +214,6 @@ export async function crossCheckBusiness(): Promise<{ business: Business; result
     contradictions: mapContradictions(profile.contradictions),
     limitations: Array.isArray(profile.limitations) ? profile.limitations.map(String) : [],
   };
-  return { business: await getBusiness(), result };
 }
 
 const toApiScope = (scope: DisclosureScope) => ({ fields: scope.fields, evidenceTypes: scope.evidence });

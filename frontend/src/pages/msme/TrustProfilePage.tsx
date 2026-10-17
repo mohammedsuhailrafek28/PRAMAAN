@@ -12,6 +12,7 @@ import { DescriptorBadge, EvidenceBadges, EvidenceStatusBadge } from "@/componen
 import { ROUTES } from "@/components/layout/navigation";
 import { useAppStore } from "@/store/appStore";
 import { getApiError } from "@/services/api";
+import { isStaleSession } from "@/services/sessionEpoch";
 import { useToast } from "@/components/ui/use-toast";
 import { backendFieldLabel, documentTypeLabel, sourceLabel } from "@/lib/fieldLabels";
 import { fieldFreshness, fieldValueText, TRUST_FIELDS } from "@/lib/trustProfileView";
@@ -40,6 +41,7 @@ export function TrustProfilePage() {
       await generateTrustProfile();
       toast({ title: "Trust Profile updated", description: "A new version was generated from your current claims and evidence.", variant: "success" });
     } catch (e) {
+      if (isStaleSession(e)) return;
       toast({ title: "Trust Profile generation failed", description: getApiError(e), variant: "destructive" });
     } finally { setGenerating(false); }
   }

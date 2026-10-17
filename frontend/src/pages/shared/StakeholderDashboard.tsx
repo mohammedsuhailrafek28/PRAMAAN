@@ -12,6 +12,7 @@ import { ConsentStatusBadge } from "@/components/shared/EvidenceStatusBadge";
 import { DisclosureSelector } from "@/components/shared/DisclosureSelector";
 import * as api from "@/services/api";
 import { getApiError } from "@/services/api";
+import { captureSession, isStaleSession } from "@/services/sessionEpoch";
 import type { ConsentRequest, Role } from "@/types";
 import { scopeCountPhrase, scopeSize, type DisclosureScope } from "@/lib/disclosure";
 import { workspaceLabel } from "@/components/layout/navigation";
@@ -75,11 +76,13 @@ function NewRequestPanel({ onSent, onClose }: { onSent: () => void; onClose: () 
   async function send() {
     if (!found) return;
     setSending(true);
+    const session = captureSession();
     try {
-      await api.createConsentRequest({ lookup: found.gstin, purpose, scope: selected });
+      await session.run(api.createConsentRequest({ lookup: found.gstin, purpose, scope: selected }));
       toast({ title: "Request sent", description: `${found.legalName} will decide what to approve and for how long.`, variant: "success" });
       onSent();
     } catch (e) {
+      if (isStaleSession(e)) return;
       toast({ title: "Request failed", description: getApiError(e), variant: "destructive" });
     } finally { setSending(false); }
   }
@@ -138,8 +141,9 @@ export function StakeholderDashboard({ role, helperText }: { role: Extract<Role,
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setRequests(await api.getOutgoingRequests()); }
-    catch (e) { toast({ title: "Workspace unavailable", description: getApiError(e), variant: "destructive" }); }
+    const session = captureSession();
+    try { setRequests(await session.run(api.getOutgoingRequests())); }
+    catch (e) { if (isStaleSession(e)) return; toast({ title: "Workspace unavailable", description: getApiError(e), variant: "destructive" }); }
     finally { setLoading(false); }
   }, [toast]);
 

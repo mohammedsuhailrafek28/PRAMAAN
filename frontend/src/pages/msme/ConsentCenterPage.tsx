@@ -12,6 +12,7 @@ import { SecureLinkForm } from "@/components/consent/SecureLinkForm";
 import { useAppStore } from "@/store/appStore";
 import { useToast } from "@/components/ui/use-toast";
 import { getApiError, revokeAccessGrant } from "@/services/api";
+import { captureSession, isStaleSession } from "@/services/sessionEpoch";
 import { scopeSize, type DisclosureScope } from "@/lib/disclosure";
 import { CONSENT_DURATION_LABELS, type AccessGrant, type ConsentDurationHours, type ConsentRequest } from "@/types";
 
@@ -59,12 +60,14 @@ export function ConsentCenterPage() {
       setApproving(null);
       setTab("active");
     } catch (e) {
+      if (isStaleSession(e)) return;
       toast({ title: "Approval failed", description: getApiError(e), variant: "destructive" });
     }
   }
 
   async function runConfirmed() {
     if (!confirming) return;
+    const session = captureSession();
     try {
       if (confirming.kind === "decline") {
         await rejectConsentRequest(confirming.request.id);
@@ -73,11 +76,12 @@ export function ConsentCenterPage() {
         await revokeConsentRequest(confirming.request.id);
         toast({ title: "Access revoked", description: `${confirming.request.requesterName} can no longer open your shared information.`, variant: "warning" });
       } else {
-        await revokeAccessGrant(confirming.grant.id);
+        await session.run(revokeAccessGrant(confirming.grant.id));
         await Promise.all([loadAccessGrants(), loadAuditLogs()]);
         toast({ title: "Secure link revoked", description: "Anyone opening the link will now see that access was revoked.", variant: "warning" });
       }
     } catch (e) {
+      if (isStaleSession(e)) return; // session ended: no toast, nothing to retry
       toast({ title: "That didn't work", description: getApiError(e), variant: "destructive" });
       throw e;
     }

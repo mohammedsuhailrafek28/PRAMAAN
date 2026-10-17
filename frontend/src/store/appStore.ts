@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import * as api from "@/services/api";
+import { advanceEpoch, captureSession, isStaleSession } from "@/services/sessionEpoch";
 import type { DisclosureScope } from "@/lib/disclosure";
 import type {
   AccessGrant,
@@ -58,108 +59,128 @@ const INITIAL_STATE = {
   error: null,
 } satisfies Partial<AppState>;
 
-// Bumped on every reset so responses that were in flight for the previous
-// user are discarded instead of repopulating the next user's session.
-let sessionEpoch = 0;
+/** Records an action error unless it belongs to a session that already ended. */
+function failure(set: (partial: Partial<AppState>) => void, error: unknown, extra: Partial<AppState> = {}) {
+  if (!isStaleSession(error)) set({ ...extra, error: api.getApiError(error) });
+}
 
+// Every async action captures the session before it starts (services/sessionEpoch).
+// If the user logs out or another account signs in meanwhile, its result AND its
+// error are dropped, and it must not chain follow-up requests: those would be
+// sent with the new user's token. Mutations that already reached the server are
+// not cancelled; only their effect on this frontend is suppressed.
 export const useAppStore = create<AppState>((set, get) => ({
   ...INITIAL_STATE,
 
-  reset: () => { sessionEpoch += 1; set({ ...INITIAL_STATE }); },
+  reset: () => { advanceEpoch(); set({ ...INITIAL_STATE }); },
 
   loadBusiness: async () => {
-    const epoch = sessionEpoch;
+    const session = captureSession();
     set({ loading: true, error: null });
     try {
-      const [business, trustProfile] = await Promise.all([api.getBusiness(), api.getTrustProfile()]);
-      if (epoch !== sessionEpoch) return;
+      const [business, trustProfile] = await session.run(Promise.all([api.getBusiness(), api.getTrustProfile()]));
       set({ business, trustProfile, loading: false });
-    } catch (error) {
-      if (epoch !== sessionEpoch) return;
-      set({ loading: false, error: api.getApiError(error) });
-    }
+    } catch (error) { failure(set, error, { loading: false }); }
   },
 
   saveBusinessProfile: async (input) => {
+    const session = captureSession();
     set({ error: null });
-    // Saving claims resets the backend cross-check status, so any earlier result is no longer current.
-    try { set({ business: await api.saveBusinessProfile(input), crossCheckResult: null }); }
-    catch (error) { set({ error: api.getApiError(error) }); throw error; }
+    try {
+      const business = await session.run(api.saveBusinessProfile(input));
+      // Saving claims resets the backend cross-check status, so any earlier result is no longer current.
+      set({ business, crossCheckResult: null });
+    } catch (error) { failure(set, error); throw error; }
   },
 
   uploadBusinessDocument: async (docType, file, metadata) => {
+    const session = captureSession();
     set({ error: null });
-    try { await api.uploadBusinessDocument(docType, file, metadata); }
-    catch (error) { set({ error: api.getApiError(error) }); throw error; }
+    try { await session.run(api.uploadBusinessDocument(docType, file, metadata)); }
+    catch (error) { failure(set, error); throw error; }
   },
 
   crossCheckBusiness: async () => {
+    const session = captureSession();
     set({ loading: true, error: null });
     try {
-      const { business, result } = await api.crossCheckBusiness();
+      const result = await session.run(api.crossCheckBusiness());
+      const business = await session.run(api.getBusiness());
       set({ business, crossCheckResult: result, loading: false });
       await get().loadAuditLogs();
       return result;
-    } catch (error) { set({ loading: false, error: api.getApiError(error) }); throw error; }
+    } catch (error) { failure(set, error, { loading: false }); throw error; }
   },
 
   generateTrustProfile: async () => {
+    const session = captureSession();
     set({ loading: true, error: null });
     try {
-      const trustProfile = await api.generateTrustProfile();
+      const trustProfile = await session.run(api.generateTrustProfile());
       // Generation re-runs the cross-check server-side; refresh business state to match.
-      const business = await api.getBusiness();
+      const business = await session.run(api.getBusiness());
       set({ trustProfile, business, loading: false });
       await get().loadAuditLogs();
-    } catch (error) { set({ loading: false, error: api.getApiError(error) }); throw error; }
+    } catch (error) { failure(set, error, { loading: false }); throw error; }
   },
 
   loadConsentRequests: async () => {
-    const epoch = sessionEpoch;
-    try { const value = await api.getIncomingRequests(); if (epoch === sessionEpoch) set({ consentRequests: value, error: null }); }
-    catch (error) { if (epoch === sessionEpoch) set({ error: api.getApiError(error) }); }
+    const session = captureSession();
+    try { set({ consentRequests: await session.run(api.getIncomingRequests()), error: null }); }
+    catch (error) { failure(set, error); }
   },
 
   loadAccessGrants: async () => {
-    const epoch = sessionEpoch;
-    try { const value = await api.getAccessGrants(); if (epoch === sessionEpoch) set({ accessGrants: value }); }
-    catch (error) { if (epoch === sessionEpoch) set({ error: api.getApiError(error) }); }
+    const session = captureSession();
+    try { set({ accessGrants: await session.run(api.getAccessGrants()) }); }
+    catch (error) { failure(set, error); }
   },
 
   approveConsentRequest: async (id, scope, duration) => {
-    await api.approveConsentRequest(id, scope, duration);
+    const session = captureSession();
+    await session.run(api.approveConsentRequest(id, scope, duration));
     await get().loadConsentRequests();
+    session.assertCurrent(); // do not reload audit logs on behalf of a different user
     await get().loadAuditLogs();
   },
 
   rejectConsentRequest: async (id) => {
-    await api.rejectConsentRequest(id);
+    const session = captureSession();
+    await session.run(api.rejectConsentRequest(id));
     await get().loadConsentRequests();
+    session.assertCurrent();
     await get().loadAuditLogs();
   },
 
   revokeConsentRequest: async (id) => {
-    await api.revokeConsentRequest(id);
+    const session = captureSession();
+    await session.run(api.revokeConsentRequest(id));
     await get().loadConsentRequests();
+    session.assertCurrent();
     await get().loadAuditLogs();
   },
 
   loadAuditLogs: async () => {
-    const epoch = sessionEpoch;
-    try { const value = await api.getAuditLogs(); if (epoch === sessionEpoch) set({ auditLogs: value, error: null }); }
-    catch (error) { if (epoch === sessionEpoch) set({ error: api.getApiError(error) }); }
+    const session = captureSession();
+    try { set({ auditLogs: await session.run(api.getAuditLogs()), error: null }); }
+    catch (error) { failure(set, error); }
   },
 
   loadNotifications: async () => {
-    const epoch = sessionEpoch;
-    try { const value = await api.getNotifications(); if (epoch === sessionEpoch) set({ notifications: value, error: null }); }
-    catch (error) { if (epoch === sessionEpoch) set({ error: api.getApiError(error) }); }
+    const session = captureSession();
+    try { set({ notifications: await session.run(api.getNotifications()), error: null }); }
+    catch (error) { failure(set, error); }
   },
 
   markNotificationRead: async (id) => {
-    await api.markNotificationRead(id);
-    const current = get().notifications;
-    set({ notifications: current.map((n) => (n.id === id ? { ...n, read: true } : n)) });
+    const session = captureSession();
+    try {
+      await session.run(api.markNotificationRead(id));
+      set({ notifications: get().notifications.map((n) => (n.id === id ? { ...n, read: true } : n)) });
+    } catch (error) {
+      // Fire-and-forget from the bell: an obsolete session is simply ignored.
+      if (!isStaleSession(error)) throw error;
+    }
   },
   clearError: () => set({ error: null }),
 }));
