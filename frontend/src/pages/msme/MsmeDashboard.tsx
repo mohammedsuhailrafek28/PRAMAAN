@@ -8,6 +8,7 @@ import { SectionCard } from "@/components/shared/SectionCard";
 import { AuditTimeline } from "@/components/shared/AuditTimeline";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ErrorState, LoadingState } from "@/components/shared/AsyncState";
+import { RequesterIdentityBadge } from "@/components/shared/RequesterIdentityBadge";
 import { EvidenceStatusBadge, LifecycleBadge } from "@/components/shared/EvidenceStatusBadge";
 import { ROUTES } from "@/components/layout/navigation";
 import { useAppStore } from "@/store/appStore";
@@ -169,7 +170,8 @@ export function MsmeDashboard() {
                   <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600"><KeyRound className="h-3.5 w-3.5" aria-hidden /></div>
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-slate-900">{request.requesterName}</p>
-                    <p className="text-xs text-slate-500">{scopeSize(request.approved)} item{scopeSize(request.approved) === 1 ? "" : "s"} · {request.purpose || "Verification"} · {timeUntil(request.expiresAt)}</p>
+                    <div className="mt-0.5"><RequesterIdentityBadge identity={request.requesterIdentity} /></div>
+                    <p className="mt-0.5 text-xs text-slate-500">{scopeSize(request.approved)} item{scopeSize(request.approved) === 1 ? "" : "s"} · {request.purpose || "Verification"} · {timeUntil(request.expiresAt)}</p>
                   </div>
                 </li>
               ))}

@@ -3,7 +3,9 @@ import { AlertTriangle, Building2, Clock, Landmark, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConsentStatusBadge, LinkStatusBadge } from "@/components/shared/EvidenceStatusBadge";
+import { RequesterIdentityBadge, RequesterOrganization } from "@/components/shared/RequesterIdentityBadge";
 import { ScopeColumns } from "@/components/consent/ScopeColumns";
+import { effectiveAssurance } from "@/lib/requesterIdentity";
 import { backendFieldLabel } from "@/lib/fieldLabels";
 import { scopeSize, withheldScope } from "@/lib/disclosure";
 import { formatDateTime, formatDurationDays, timeAgo, timeUntil } from "@/lib/utils";
@@ -11,13 +13,17 @@ import type { AccessGrant, ConsentRequest } from "@/types";
 
 function Requester({ request }: { request: ConsentRequest }) {
   const Icon = request.requesterRole === "bank" ? Landmark : Building2;
-  const role = request.requesterRole === "bank" ? "Bank / NBFC" : request.requesterRole === "buyer" ? "Buyer" : "Verifier";
+  const declared = request.requesterRole === "bank" ? "Bank / NBFC" : request.requesterRole === "buyer" ? "Buyer" : "Verifier";
+  const reviewed = effectiveAssurance(request.requesterIdentity).level === "ORG_REVIEWED" || effectiveAssurance(request.requesterIdentity).level === "AUTHORIZED";
+  // The account type is chosen at registration, so it is a claim unless a review is in force.
+  const role = reviewed || !request.requesterRole ? declared : `Declares itself a ${declared}`;
   return (
     <div className="flex min-w-0 items-start gap-3">
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600"><Icon className="h-5 w-5" aria-hidden /></div>
       <div className="min-w-0">
-        <h3 className="truncate text-[15px] font-semibold text-slate-900">{request.requesterName}</h3>
+        <RequesterOrganization heading identity={request.requesterIdentity} fallbackName={request.requesterName} />
         <p className="text-xs text-slate-500">{role} · requested {timeAgo(request.requestedAt)}</p>
+        <div className="mt-1.5"><RequesterIdentityBadge identity={request.requesterIdentity} /></div>
       </div>
     </div>
   );

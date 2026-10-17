@@ -3,12 +3,15 @@ import { Link } from "react-router-dom";
 import { AlertTriangle, Eye } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { RequesterIdentityDetails } from "@/components/shared/RequesterIdentityBadge";
 import { DisclosureSelector } from "@/components/shared/DisclosureSelector";
 import { ROUTES } from "@/components/layout/navigation";
 import { backendFieldLabel } from "@/lib/fieldLabels";
+import { approvalGate, approvalNeedsAcknowledgement, organizationNames, type ApprovalGate } from "@/lib/requesterIdentity";
 import { EMPTY_SCOPE, scopeLabelPhrase, scopeSize, type DisclosureScope } from "@/lib/disclosure";
 import { formatDateTime } from "@/lib/utils";
 import { CONSENT_DURATION_LABELS, type ConsentDurationHours, type ConsentRequest, type TrustProfile } from "@/types";
@@ -31,11 +34,15 @@ export function ApproveDialog({ request, trustProfile, onApprove, onClose }: App
   const [selected, setSelected] = useState<DisclosureScope>(EMPTY_SCOPE);
   const [duration, setDuration] = useState<ConsentDurationHours>(168);
   const [submitting, setSubmitting] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
-    if (request) { setSelected(request.requested); setDuration(168); }
+    if (request) { setSelected(request.requested); setDuration(168); setAcknowledged(false); }
   }, [request]);
 
+  const identity = request?.requesterIdentity;
+  const requesterLabel = identity && request ? organizationNames(identity, request.requesterName).primary : request?.requesterName;
+  const gate: ApprovalGate = identity ? approvalGate({ identity, selectedCount: scopeSize(selected), acknowledged, submitting }) : { canApprove: false };
   const requestedCount = request ? scopeSize(request.requested) : 0;
   const selectedCount = scopeSize(selected);
   // Preview only: the backend sets the real expiry at approval time.
@@ -50,9 +57,17 @@ export function ApproveDialog({ request, trustProfile, onApprove, onClose }: App
     <Dialog open={!!request} onOpenChange={(open) => !open && !submitting && onClose()}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Approve access for {request?.requesterName}</DialogTitle>
+          <DialogTitle>Approve access for {requesterLabel}</DialogTitle>
           <DialogDescription>Purpose: {request?.purpose || "Not stated"}. You can share some or all of what was requested, never more.</DialogDescription>
         </DialogHeader>
+
+        {request && identity && <RequesterIdentityDetails identity={identity} fallbackName={request.requesterName} />}
+        {request && identity && approvalNeedsAcknowledgement(identity) && (
+          <label htmlFor="ack-unverified" className="flex cursor-pointer items-start gap-2.5 rounded-md border border-warning-border px-3 py-2 text-sm text-slate-800">
+            <Checkbox id="ack-unverified" className="mt-0.5" checked={acknowledged} onCheckedChange={(value) => setAcknowledged(value === true)} />
+            <span>I understand this requester has not been independently checked, and I still choose what to share.</span>
+          </label>
+        )}
 
         <div>
           <div className="mb-2 flex items-baseline justify-between gap-2">
@@ -62,7 +77,7 @@ export function ApproveDialog({ request, trustProfile, onApprove, onClose }: App
             </span>
           </div>
           {request && <DisclosureSelector idPrefix="approve" value={selected} onChange={setSelected} options={request.requested} requested={request.requested} />}
-          <p className="mt-2 text-xs text-slate-500">Only items {request?.requesterName} asked for are listed. Anything they didn't request can't be added here.</p>
+          <p className="mt-2 text-xs text-slate-500">Only items {requesterLabel} asked for are listed. Anything they didn't request can't be added here.</p>
           {request && request.unsupportedRequested.length > 0 && (
             <p className="mt-1 text-xs text-warning-foreground">Not shareable through Pramaan and will not be approved: {request.unsupportedRequested.map(backendFieldLabel).join(", ")}</p>
           )}
@@ -82,7 +97,7 @@ export function ApproveDialog({ request, trustProfile, onApprove, onClose }: App
 
         {trustProfile ? (
           <div className="rounded-lg border border-info-border bg-info-bg p-3 text-sm text-info-foreground">
-            <p className="flex items-center gap-1.5 font-semibold"><Eye className="h-4 w-4" aria-hidden />What {request?.requesterName} will see</p>
+            <p className="flex items-center gap-1.5 font-semibold"><Eye className="h-4 w-4" aria-hidden />What {requesterLabel} will see</p>
             <p className="mt-1">
               {selectedCount === 0 ? "Nothing selected yet." : <>{scopeLabelPhrase(selected, 4)}, from Trust Profile v{trustProfile.version}, until about {formatDateTime(until)}. Later changes to your profile are not shared under this consent.</>}
             </p>
@@ -94,10 +109,12 @@ export function ApproveDialog({ request, trustProfile, onApprove, onClose }: App
           </p>
         )}
 
+        {gate.reason && <p id="approve-reason" role="status" className="text-xs text-slate-600">{gate.reason}</p>}
+
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
           {trustProfile ? (
-            <Button onClick={() => void approve()} disabled={selectedCount === 0 || submitting}>
+            <Button onClick={() => void approve()} disabled={!gate.canApprove} aria-describedby={gate.reason ? "approve-reason" : undefined}>
               {submitting ? "Approving…" : `Approve ${selectedCount} item${selectedCount === 1 ? "" : "s"}`}
             </Button>
           ) : (

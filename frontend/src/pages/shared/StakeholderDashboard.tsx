@@ -9,12 +9,15 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConsentStatusBadge } from "@/components/shared/EvidenceStatusBadge";
+import { RequesterIdentityDetails } from "@/components/shared/RequesterIdentityBadge";
 import { DisclosureSelector } from "@/components/shared/DisclosureSelector";
 import * as api from "@/services/api";
 import { getApiError } from "@/services/api";
 import { captureSession, isStaleSession } from "@/services/sessionEpoch";
 import type { ConsentRequest, Role } from "@/types";
-import { scopeCountPhrase, scopeSize, type DisclosureScope } from "@/lib/disclosure";
+import { EVIDENCE_DISCLOSURES, FIELD_DISCLOSURES, scopeCountPhrase, scopeSize, type DisclosureScope } from "@/lib/disclosure";
+import { UNVERIFIED_IDENTITY, effectiveAssurance, isRestrictedFor, restrictedItems, restrictionMessage, type RequesterIdentity } from "@/lib/requesterIdentity";
+import { useAuthStore } from "@/store/authStore";
 import { workspaceLabel } from "@/components/layout/navigation";
 import { cn, formatDate, parseDate, timeAgo, timeUntil } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
@@ -55,7 +58,7 @@ function accessText(request: ConsentRequest): string {
   }
 }
 
-function NewRequestPanel({ onSent, onClose }: { onSent: () => void; onClose: () => void }) {
+function NewRequestPanel({ identity, onSent, onClose }: { identity: RequesterIdentity; onSent: () => void; onClose: () => void }) {
   const { toast } = useToast();
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<Awaited<ReturnType<typeof api.lookupBusiness>> | null>(null);
@@ -64,6 +67,12 @@ function NewRequestPanel({ onSent, onClose }: { onSent: () => void; onClose: () 
   const [purpose, setPurpose] = useState<Purpose>("Vendor Onboarding");
   const [selected, setSelected] = useState<DisclosureScope>(PRESETS["Vendor Onboarding"]);
   const [sending, setSending] = useState(false);
+
+  // Explanatory only: the server decides what a requester may ask for.
+  const restricted = restrictedItems(selected, identity);
+  const restrictedNotes = Object.fromEntries([...FIELD_DISCLOSURES, ...EVIDENCE_DISCLOSURES].filter((item) => isRestrictedFor(item, identity)).map((item) => [item.key, "Needs a reviewed requester. May be refused for your account."]));
+  const message = restrictionMessage(identity, restricted);
+  const withoutRestricted = () => setSelected({ fields: selected.fields.filter((key) => !restricted.some((item) => item.key === key)), evidence: selected.evidence.filter((key) => !restricted.some((item) => item.key === key)) });
 
   async function search() {
     if (!query.trim()) return;
@@ -120,7 +129,13 @@ function NewRequestPanel({ onSent, onClose }: { onSent: () => void; onClose: () 
           </div>
           <div>
             <p className="mb-2 text-sm font-medium text-slate-900">3. What you're asking for <span className="font-normal text-slate-500">· ask only for what you need</span></p>
-            <DisclosureSelector idPrefix="request" value={selected} onChange={setSelected} />
+            <DisclosureSelector idPrefix="request" value={selected} onChange={setSelected} notes={restrictedNotes} />
+            {message && (
+              <div role="status" className="mt-3 flex flex-col gap-2 rounded-lg border border-warning-border bg-warning-bg p-3 text-sm text-warning-foreground sm:flex-row sm:items-center sm:justify-between">
+                <p>{message}</p>
+                <Button variant="outline" size="sm" className="shrink-0" onClick={withoutRestricted}>Remove these items</Button>
+              </div>
+            )}
           </div>
           <div className="flex flex-col gap-3 rounded-lg bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-slate-700">You are about to request {scopeCountPhrase(selected)} from <span className="font-medium">{found.legalName}</span> for {purpose.toLowerCase()}.</p>
@@ -134,6 +149,8 @@ function NewRequestPanel({ onSent, onClose }: { onSent: () => void; onClose: () 
 
 export function StakeholderDashboard({ role, helperText }: { role: Extract<Role, "buyer" | "bank">; helperText: string }) {
   const { toast } = useToast();
+  const currentUser = useAuthStore((state) => state.currentUser);
+  const identity = currentUser?.requesterIdentity;
   const [requests, setRequests] = useState<ConsentRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [composing, setComposing] = useState(false);
@@ -171,7 +188,14 @@ export function StakeholderDashboard({ role, helperText }: { role: Extract<Role,
         </>}
       />
 
-      {(composing || (!loading && requests.length === 0)) && <NewRequestPanel onSent={() => { setComposing(false); void load(); }} onClose={() => setComposing(false)} />}
+      {currentUser && identity && (
+        <details className="group rounded-lg border border-border bg-white p-4 shadow-card" open={effectiveAssurance(identity).level !== "AUTHORIZED"}>
+          <summary className="cursor-pointer text-sm font-semibold text-slate-900">How businesses see your organization</summary>
+          <RequesterIdentityDetails className="mt-3" identity={identity} fallbackName={currentUser.orgName} />
+        </details>
+      )}
+
+      {(composing || (!loading && requests.length === 0)) && <NewRequestPanel identity={identity ?? UNVERIFIED_IDENTITY} onSent={() => { setComposing(false); void load(); }} onClose={() => setComposing(false)} />}
 
       <div className="flex flex-wrap gap-2" role="group" aria-label="Filter cases">
         {FILTERS.map((f) => (

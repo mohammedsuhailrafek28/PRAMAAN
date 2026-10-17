@@ -8,6 +8,7 @@ import type {
 } from "@/types";
 import { formatSharedFields } from "@/lib/sharedFields";
 import { parseScope, type DisclosureScope } from "@/lib/disclosure";
+import { identityFromPayload } from "@/lib/requesterIdentity";
 import { TOKEN_KEY, isSessionExpiry, notifyUnauthorized } from "@/services/session";
 
 const API_URL = (import.meta.env?.VITE_API_URL || "http://localhost:4000/api").replace(/\/$/, "");
@@ -38,6 +39,9 @@ const FRIENDLY_ERRORS: Record<string, string> = {
   INVALID_ACCESS_LINK: "This link is not valid.",
   PROFILE_SNAPSHOT_UNAVAILABLE: "The shared Trust Profile version is no longer available.",
   CONFLICT: "This request has already been handled. Refresh to see its current state.",
+  REQUESTER_NOT_VERIFIED: "Your organization is not yet reviewed for this kind of request. Remove the higher-sensitivity items, or ask Pramaan to review your authorization.",
+  REQUESTER_RESTRICTED: "Your organization is not yet reviewed for this kind of request. Remove the higher-sensitivity items, or ask Pramaan to review your authorization.",
+  REQUESTER_SUSPENDED: "Your account is suspended and cannot request information.",
   RATE_LIMITED: "Too many requests. Please wait a moment and try again.",
   INTERNAL_SERVER_ERROR: "Something went wrong on our side. Please try again.",
 };
@@ -62,12 +66,17 @@ const statusFromApi: Record<string, ConsentRequest["status"]> = {
 };
 function mapUser(raw: any): User {
   const name = raw.name || "Pramaan user";
-  return { id: raw.id, role: roleFromApi[raw.role] || raw.role, name, orgName: raw.organizationName, email: raw.email, avatarInitials: name.split(" ").map((part: string) => part[0]).join("").slice(0, 2).toUpperCase() };
+  const role = roleFromApi[raw.role] || raw.role;
+  return {
+    id: raw.id, role, name, orgName: raw.organizationName, email: raw.email,
+    avatarInitials: name.split(" ").map((part: string) => part[0]).join("").slice(0, 2).toUpperCase(),
+    requesterIdentity: role === "msme" ? undefined : identityFromPayload(raw, raw.organizationName),
+  };
 }
 
 function mapActor(raw: any): AuditActor | undefined {
   if (!raw) return undefined;
-  return { name: raw.name || undefined, organization: raw.organizationName || undefined, role: roleFromApi[raw.role] };
+  return { name: raw.name || undefined, organization: raw.organizationName || undefined, role: roleFromApi[raw.role], identity: raw.requesterIdentity === undefined ? undefined : identityFromPayload(raw, raw.organizationName) };
 }
 
 function mapDocument(doc: any): BusinessDocument {
@@ -125,6 +134,7 @@ function mapConsent(raw: any): ConsentRequest {
     requesterId: raw.requesterId ?? raw.requester?.id,
     requesterName: raw.requester?.organizationName || raw.requester?.name || "Verifier",
     requesterRole: roleFromApi[raw.requester?.role] as ConsentRequest["requesterRole"],
+    requesterIdentity: identityFromPayload(raw, raw.requester?.organizationName || raw.requester?.name),
     purpose: raw.purpose || undefined,
     requested: requested.scope, approved: approved.scope, unsupportedRequested: requested.unsupported,
     durationDays: typeof raw.durationDays === "number" ? raw.durationDays : null,
