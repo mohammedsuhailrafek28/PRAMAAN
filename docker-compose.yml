@@ -6,7 +6,7 @@ services:
       NODE_ENV: production
       PORT: 4000
       DATABASE_URL: file:/app/data/dev.db
-      JWT_SECRET: change-this-local-docker-secret
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set for the production container}
       JWT_EXPIRES_IN: 7d
       UPLOAD_DIR: /app/uploads
       CORS_ORIGIN: http://localhost:5173,http://localhost:3000,http://localhost:4173

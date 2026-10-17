@@ -10,6 +10,7 @@ import { prisma } from "./config/prisma.js";
 import { openApiSpec } from "./docs/openapi.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { requestId } from "./middleware/requestId.js";
+import { sanitizeRequestLogPath } from "./utils/requestLogPath.js";
 import authRoutes from "./modules/auth/auth.routes.js";
 import businessRoutes from "./modules/business/business.routes.js";
 import passportRoutes from "./modules/passport/passport.routes.js";
@@ -49,7 +50,7 @@ app.use(
         return {
           id: req.id,
           method: req.method,
-          path: raw.originalUrl ?? req.url
+          path: sanitizeRequestLogPath(raw.originalUrl ?? req.url)
         };
       },
       res(res) {
@@ -62,14 +63,14 @@ app.use(
       ...value,
       requestId: req.requestId,
       method: req.method,
-      path: req.originalUrl,
+      path: sanitizeRequestLogPath(req.originalUrl),
       statusCode: res.statusCode
     }),
     customErrorObject: (req, res, error, value) => ({
       ...value,
       requestId: req.requestId,
       method: req.method,
-      path: req.originalUrl,
+      path: sanitizeRequestLogPath(req.originalUrl),
       statusCode: res.statusCode,
       errorMessage: error.message
     })

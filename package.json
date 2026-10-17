@@ -11,6 +11,7 @@
     "test:reports": "tsx scripts/report-composer-tests.ts && tsx scripts/report-rendering-tests.ts",
     "smoke": "tsx scripts/smoke-test.ts",
     "reliability": "tsx scripts/reliability-tests.ts",
+    "test:security": "tsx scripts/security-hardening-tests.ts",
     "demo:reset": "tsx scripts/demo-reset.ts",
     "browser:install": "playwright install chromium",
     "db:init": "tsx prisma/init-sqlite.ts",
