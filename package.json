@@ -15,6 +15,7 @@
     "test:security": "tsx scripts/security-hardening-tests.ts",
     "test:identity-assurance": "tsx scripts/identity-assurance-tests.ts",
     "test:evidence-revisions": "tsx scripts/evidence-revision-integrity-tests.ts",
+    "test:atomic-reports": "tsx scripts/atomic-report-generation-tests.ts",
     "demo:reset": "tsx scripts/demo-reset.ts",
     "browser:install": "playwright install chromium",
     "db:init": "tsx prisma/init-sqlite.ts",

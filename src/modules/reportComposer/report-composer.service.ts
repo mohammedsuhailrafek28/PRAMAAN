@@ -6,7 +6,8 @@ import { listReportTypes } from "./report-template.registry.js";
 import { loadReportData } from "./report-data-loader.js";
 import { buildExecutiveSummary, trustMetricExplanations } from "./report-summary-builder.js";
 import { buildTimeline } from "./report-timeline-builder.js";
-import type { ReportDocument } from "./report-composer.types.js";
+import { validateReportDocument, type ReportDocument } from "./report-composer.types.js";
+import { newCuid } from "../../utils/id.js";
 
 export { listReportTypes };
 
@@ -14,41 +15,71 @@ export async function generateReport(user: Express.User, reportTypeRaw: string) 
   const reportType = parseReportType(reportTypeRaw);
   const data = await loadReportData(user, reportType);
   const generatedAt = new Date();
-  const placeholder = await prisma.generatedReport.create({
-    data: {
-      businessId: data.business.id,
-      reportType,
-      reportVersion: data.template.reportVersion,
-      trustProfileId: data.passport.id,
-      readinessEvaluationId: data.readinessEvaluationId,
-      snapshotJson: {},
-      generatedAt,
-      expiresAt: null,
-      createdByUserId: user.id
-    }
-  });
-
+  const reportId = newCuid();
   const snapshot = composeReportDocument({
-    reportId: placeholder.id,
+    reportId,
     generatedAt,
     revokedAt: null,
     expiresAt: null,
     ...data
   });
+  validateReportDocument(snapshot, { reportId, businessId: data.business.id });
 
-  const report = await prisma.generatedReport.update({
-    where: { id: placeholder.id },
-    data: { snapshotJson: snapshot as Prisma.InputJsonValue }
+  const report = await prisma.$transaction(async (tx) => persistReportAtomically(tx, {
+    reportId,
+    businessId: data.business.id,
+    reportType,
+    reportVersion: data.template.reportVersion,
+    trustProfileId: data.passport.id,
+    readinessEvaluationId: data.readinessEvaluationId,
+    snapshot,
+    generatedAt,
+    createdByUserId: user.id
+  }), { maxWait: 15000, timeout: 30000 });
+
+  return { report: metadataFor(report), document: snapshot };
+}
+
+type ReportPersistenceClient = Pick<typeof prisma, "generatedReport" | "auditLog">;
+
+type ReportPersistenceInput = {
+  reportId: string;
+  businessId: string;
+  reportType: ReportType;
+  reportVersion: string;
+  trustProfileId: string;
+  readinessEvaluationId: string | null;
+  snapshot: ReportDocument;
+  generatedAt: Date;
+  createdByUserId: string;
+};
+
+/** Create the complete report and its audit record inside the caller's transaction. */
+export async function persistReportAtomically(client: ReportPersistenceClient, input: ReportPersistenceInput) {
+  const report = await client.generatedReport.create({
+    data: {
+      id: input.reportId,
+      businessId: input.businessId,
+      reportType: input.reportType,
+      reportVersion: input.reportVersion,
+      trustProfileId: input.trustProfileId,
+      readinessEvaluationId: input.readinessEvaluationId,
+      snapshotJson: input.snapshot as Prisma.InputJsonValue,
+      generatedAt: input.generatedAt,
+      expiresAt: null,
+      createdByUserId: input.createdByUserId
+    }
   });
 
   await writeAuditLog({
-    businessId: data.business.id,
-    actorId: user.id,
+    client,
+    businessId: input.businessId,
+    actorId: input.createdByUserId,
     action: AuditAction.REPORT_GENERATED,
-    metadata: auditMetadata(snapshot) as Prisma.InputJsonValue
+    metadata: auditMetadata(input.snapshot) as Prisma.InputJsonValue
   });
 
-  return { report: metadataFor(report), document: snapshot };
+  return report;
 }
 
 export async function listReports(user: Express.User, filters: { reportType?: string; revoked?: string }) {
