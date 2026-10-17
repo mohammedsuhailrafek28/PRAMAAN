@@ -12,6 +12,7 @@
     "smoke": "tsx scripts/smoke-test.ts",
     "reliability": "tsx scripts/reliability-tests.ts",
     "test:security": "tsx scripts/security-hardening-tests.ts",
+    "test:identity-assurance": "tsx scripts/identity-assurance-tests.ts",
     "demo:reset": "tsx scripts/demo-reset.ts",
     "browser:install": "playwright install chromium",
     "db:init": "tsx prisma/init-sqlite.ts",

@@ -297,6 +297,8 @@ async function main() {
       body: { role: "BUYER", name: "Snapshot Verifier", organizationName: "Snapshot Verification Desk", email: "snapshot-verifier-smoke@pramaan.demo", password: "password123" }
     });
     const snapshotVerifierToken = snapshotVerifier.data.token;
+    run("npx", ["tsx", "scripts/requester-assurance.ts", "review", "--user-id", snapshotVerifier.data.user.id, "--operator-id", "smoke-operator-review", "--review-basis", "synthetic-smoke-review"]);
+    run("npx", ["tsx", "scripts/requester-assurance.ts", "authorize", "--user-id", snapshotVerifier.data.user.id, "--operator-id", "smoke-operator-authorize", "--authorization-basis", "synthetic-smoke-authority-review", "--authorization-reference", "synthetic-smoke-reference", "--expires-at", new Date(Date.now() + 86400000).toISOString(), "--scope-fields", "turnoverBand"]);
     const v1Version = snapshot.version;
     const snapshotConsent = await request("POST", "/api/consent-requests", {
       token: snapshotVerifierToken,
@@ -332,7 +334,7 @@ async function main() {
     assert(freshView.data.metadata.passportVersion === passportV2.data.passport.snapshotJson.version, "new consent did not use v2");
     assert(freshView.data.sharedFields.turnoverBand.value === "INR 5Cr-INR 10Cr", "new consent did not expose v2 value");
     assert(freshView.data.evidence[0]?.id === undefined && freshView.data.evidence[0]?.uploadedAt !== v1Evidence, "new consent did not use v2 evidence");
-    const pinnedGuest = await request("POST", "/api/access-grants", { token: msmeToken, body: { purpose: "Vendor onboarding", scope: { fields: ["turnoverBand"], evidenceTypes: ["GST_CERTIFICATE"] }, durationHours: 24 } });
+    const pinnedGuest = await request("POST", "/api/access-grants", { token: msmeToken, body: { recipientEmail: snapshotVerifier.data.user.email, purpose: "Vendor onboarding", scope: { fields: ["turnoverBand"], evidenceTypes: ["GST_CERTIFICATE"] }, durationHours: 24 } });
     const pinnedGuestToken = (pinnedGuest.data.grant.secureUrl as string).split("/verify/")[1];
     const pinnedGuestV2 = await request("GET", `/api/public/verify/${pinnedGuestToken}`);
     assert(pinnedGuestV2.data.grant.profileVersion === passportV2.data.passport.snapshotJson.version, "guest profile version missing or incorrect");
@@ -344,7 +346,7 @@ async function main() {
     const pinnedGuestAfterV3 = await request("GET", `/api/public/verify/${pinnedGuestToken}`);
     assert(pinnedGuestAfterV3.data.grant.profileVersion === passportV2.data.passport.snapshotJson.version, "guest link switched to latest passport");
     assert(pinnedGuestAfterV3.data.evidence[0]?.uploadedAt === guestV2Evidence, "guest link lost its pinned evidence after replacement");
-    const freshGuest = await request("POST", "/api/access-grants", { token: msmeToken, body: { purpose: "Vendor onboarding", scope: { fields: ["turnoverBand"], evidenceTypes: ["GST_CERTIFICATE"] }, durationHours: 24 } });
+    const freshGuest = await request("POST", "/api/access-grants", { token: msmeToken, body: { recipientEmail: snapshotVerifier.data.user.email, purpose: "Vendor onboarding", scope: { fields: ["turnoverBand"], evidenceTypes: ["GST_CERTIFICATE"] }, durationHours: 24 } });
     const freshGuestToken = (freshGuest.data.grant.secureUrl as string).split("/verify/")[1];
     const freshGuestView = await request("GET", `/api/public/verify/${freshGuestToken}`);
     assert(freshGuestView.data.grant.profileVersion > pinnedGuestV2.data.grant.profileVersion, "new guest link did not use the latest passport");

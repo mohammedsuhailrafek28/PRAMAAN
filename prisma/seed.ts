@@ -8,7 +8,11 @@ const prisma: PrismaClient = new Client();
 const password = "password123";
 
 async function upsertUser(input: { role: UserRole; name: string; organizationName: string; email: string }) {
-  return prisma.user.upsert({ where: { email: input.email }, update: { ...input, passwordHash: await bcrypt.hash(password, 12) }, create: { ...input, passwordHash: await bcrypt.hash(password, 12) } });
+  const user = await prisma.user.upsert({ where: { email: input.email }, update: { ...input, passwordHash: await bcrypt.hash(password, 12) }, create: { ...input, passwordHash: await bcrypt.hash(password, 12) } });
+  if (input.role === UserRole.BUYER || input.role === UserRole.BANK) {
+    await prisma.requesterAssurance.upsert({ where: { userId: user.id }, update: {}, create: { userId: user.id, status: "UNVERIFIED" } });
+  }
+  return user;
 }
 
 async function clearBusiness(businessId: string) {

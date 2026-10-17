@@ -50,6 +50,19 @@ export const openApiSpec = {
           }
         }
       },
+      RequesterIdentity: {
+        type: "object",
+        readOnly: true,
+        description: "Server-derived requester assurance summary. Registration cannot set these values.",
+        properties: {
+          status: { type: "string", enum: ["UNVERIFIED", "ORG_REVIEWED", "AUTHORIZED", "SUSPENDED"], example: "UNVERIFIED" },
+          displayName: { type: "string", example: "Acme Retail Buyers" },
+          reviewBasis: { type: "string", nullable: true, example: "registry-review-case-001" },
+          reviewedAt: { type: "string", format: "date-time", nullable: true },
+          authorizationExpiresAt: { type: "string", format: "date-time", nullable: true },
+          limitations: { type: "array", items: { type: "string" }, example: ["Independent organizational review is required."] }
+        }
+      },
       RegisterRequest: {
         type: "object",
         required: ["role", "name", "organizationName", "email", "password"],
@@ -106,7 +119,8 @@ export const openApiSpec = {
             type: "array",
             items: { type: "string" },
             example: ["legalBusinessName", "gstin", "udyamNumber", "summary", "limitations"]
-          }
+          },
+          requesterIdentity: { $ref: "#/components/schemas/RequesterIdentity", description: "Response-only server-derived requester summary." }
         }
       },
       ApproveConsentRequest: {
@@ -367,6 +381,14 @@ export const openApiSpec = {
                 example: {
                   businessId: "business-id",
                   consentId: "consent-id",
+                  requesterIdentity: {
+                    status: "UNVERIFIED",
+                    displayName: "Acme Retail Buyers",
+                    reviewBasis: null,
+                    reviewedAt: null,
+                    authorizationExpiresAt: null,
+                    limitations: ["Independent organizational review is required."]
+                  },
                   sharedFields: {
                     legalBusinessName: {
                       value: "Sharma Textiles",

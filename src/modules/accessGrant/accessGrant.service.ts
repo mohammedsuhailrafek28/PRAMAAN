@@ -7,6 +7,7 @@ import { filterPassportFields } from "../../utils/fieldFilter.js";
 import { validateDisclosureKeys } from "../../utils/disclosureCatalogue.js";
 import { deriveEvidenceLifecycle } from "../evidence/evidence-lifecycle.service.js";
 import { writeAuditLog } from "../audit/audit.service.js";
+import { enforceDisclosureAccess, requesterIdentitySummary, requiresIndependentAuthorization } from "../requesterAssurance/assurance.service.js";
 
 const purposes = new Set(["Business verification", "Loan application", "Vendor onboarding", "Procurement", "Other"]);
 
@@ -55,6 +56,11 @@ export async function create(user: Express.User, input: {
   if (!business) throw new ApiError(404, "NOT_FOUND", "Business profile not found.");
   const passport = await prisma.passport.findFirst({ where: { businessId: business.id }, orderBy: { version: "desc" } });
   if (!passport) throw new ApiError(409, "PROFILE_NOT_READY", "Business Trust Profile has not been generated yet.");
+  const linkedRequester = input.recipientEmail
+    ? await prisma.user.findUnique({ where: { email: input.recipientEmail.trim().toLowerCase() }, select: { id: true, role: true, name: true, organizationName: true, email: true } })
+    : null;
+  if (linkedRequester && (linkedRequester.role === "BUYER" || linkedRequester.role === "BANK")) await enforceDisclosureAccess(linkedRequester, scope.fields, scope.evidenceTypes, "REQUEST");
+  if (!linkedRequester && requiresIndependentAuthorization(scope.fields, scope.evidenceTypes)) throw new ApiError(403, "REQUESTER_ASSURANCE_REQUIRED", "HIGH-sensitivity guest links require a registered requester with current assurance.");
 
   const expiresAt = input.expiresAt
     ? new Date(input.expiresAt)
@@ -73,6 +79,7 @@ export async function create(user: Express.User, input: {
       recipientEmail: input.recipientEmail?.trim() || undefined,
       purpose: input.purpose,
       scopeJson: scope as Prisma.InputJsonValue,
+      requesterId: linkedRequester && (linkedRequester.role === "BUYER" || linkedRequester.role === "BANK") ? linkedRequester.id : undefined,
       passportId: passport.id,
       tokenHash: tokenDigest(token),
       expiresAt
@@ -121,7 +128,7 @@ function safeEvidence(document: any) {
 
 export async function resolveGuest(token: string) {
   if (!/^[A-Za-z0-9_-]{40,}$/.test(token)) throw new ApiError(404, "INVALID_ACCESS_LINK", "This access link is not valid.");
-  const grant = await prisma.accessGrant.findUnique({ where: { tokenHash: tokenDigest(token) }, include: { business: { include: { passports: true, documents: { orderBy: { uploadedAt: "desc" } } } } } });
+  const grant = await prisma.accessGrant.findUnique({ where: { tokenHash: tokenDigest(token) }, include: { requester: { select: { id: true, role: true, name: true, organizationName: true, email: true } }, business: { include: { passports: true, documents: { orderBy: { uploadedAt: "desc" } } } } } });
   if (!grant) throw new ApiError(404, "INVALID_ACCESS_LINK", "This access link is not valid.");
   if (grant.revokedAt || grant.status === AccessGrantStatus.REVOKED) throw new ApiError(410, "ACCESS_REVOKED", "This access link was revoked by the business.");
   if (grant.expiresAt <= new Date()) {
@@ -131,6 +138,8 @@ export async function resolveGuest(token: string) {
   }
 
   const scope = grant.scopeJson as GrantScope;
+  const requester = grant.requester && (grant.requester.role === "BUYER" || grant.requester.role === "BANK") ? grant.requester : null;
+  const assurance = requester ? await enforceDisclosureAccess(requester, scope.fields, scope.evidenceTypes, "ACCESS") : null;
   const snapshot = grant.business.passports?.find((item) => item.id === grant.passportId)?.snapshotJson;
   if (!snapshot) throw new ApiError(410, "PROFILE_SNAPSHOT_UNAVAILABLE", "The pinned Trust Profile snapshot is unavailable.");
   const fields = filterPassportFields(snapshot, scope.fields);
@@ -140,7 +149,7 @@ export async function resolveGuest(token: string) {
   await prisma.accessGrant.update({ where: { id: grant.id }, data: { lastAccessedAt: viewedAt } });
   await writeAuditLog({ businessId: grant.businessId, actorId: grant.createdByUserId, accessGrantId: grant.id, action: AuditAction.GUEST_LINK_OPENED, dedupeWindowMs: 300000, metadata: { accessType: "guest", viewedAt: viewedAt.toISOString(), fields: Object.keys(fields), evidenceTypes: evidence.map((item) => item.docType) } });
   return {
-    grant: { id: grant.id, purpose: grant.purpose, recipientName: grant.recipientName, recipientOrganization: grant.recipientOrganization, createdAt: grant.createdAt, expiresAt: grant.expiresAt, profileVersion: grant.business.passports.find((item) => item.id === grant.passportId)?.version },
+    grant: { id: grant.id, purpose: grant.purpose, recipientName: grant.recipientName, recipientOrganization: grant.recipientOrganization, createdAt: grant.createdAt, expiresAt: grant.expiresAt, profileVersion: grant.business.passports.find((item) => item.id === grant.passportId)?.version, requesterIdentity: requester ? requesterIdentitySummary(requester, assurance) : null },
     business: {
       legalName: scope.fields.includes("legalBusinessName") ? grant.business.legalName : undefined,
       gstin: scope.fields.includes("gstin") ? grant.business.gstin : undefined

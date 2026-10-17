@@ -4,6 +4,7 @@ import { ApiError } from "../../utils/apiError.js";
 import { validateDisclosureKeys } from "../../utils/disclosureCatalogue.js";
 import { writeAuditLog } from "../audit/audit.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
+import { enforceDisclosureAccess, getForRequester, requesterIdentitySummary } from "../requesterAssurance/assurance.service.js";
 
 type ConsentInput = { businessGstin: string; requestedFields: string[]; requestedEvidenceTypes?: string[]; purpose?: string };
 type ApprovalInput = { approvedFields: string[]; approvedEvidenceTypes?: string[]; durationDays: number };
@@ -37,14 +38,17 @@ async function requireOwnedConsent(userId: string, id: string) {
   return consent;
 }
 
-function publicConsent(consent: any) {
-  return { id: consent.id, requester: consent.requester && { id: consent.requester.id, name: consent.requester.name, role: consent.requester.role, organizationName: consent.requester.organizationName }, business: consent.business && { id: consent.business.id, legalName: consent.business.legalName, gstin: consent.business.gstin }, requestedFields: consent.requestedFields, requestedEvidenceTypes: consent.requestedEvidenceTypes, purpose: consent.purpose, approvedFields: consent.approvedFields, approvedEvidenceTypes: consent.approvedEvidenceTypes, status: consent.status, durationDays: consent.durationDays, approvedAt: consent.approvedAt, expiresAt: consent.expiresAt, revokedAt: consent.revokedAt, createdAt: consent.createdAt };
+async function publicConsent(consent: any) {
+  const requester = consent.requester && { id: consent.requester.id, name: consent.requester.name, role: consent.requester.role, organizationName: consent.requester.organizationName, email: consent.requester.email };
+  const assurance = requester ? await getForRequester(requester) : null;
+  return { id: consent.id, requester: requester && { id: requester.id, name: requester.name, role: requester.role, organizationName: requester.organizationName }, requesterIdentity: requester ? requesterIdentitySummary(requester, assurance) : null, business: consent.business && { id: consent.business.id, legalName: consent.business.legalName, gstin: consent.business.gstin }, requestedFields: consent.requestedFields, requestedEvidenceTypes: consent.requestedEvidenceTypes, purpose: consent.purpose, approvedFields: consent.approvedFields, approvedEvidenceTypes: consent.approvedEvidenceTypes, status: consent.status, durationDays: consent.durationDays, approvedAt: consent.approvedAt, expiresAt: consent.expiresAt, revokedAt: consent.revokedAt, createdAt: consent.createdAt };
 }
 
 export async function create(user: Express.User, input: ConsentInput) {
   if (user.role !== UserRole.BUYER && user.role !== UserRole.BANK) throw new ApiError(403, "FORBIDDEN", "Only buyers and banks can request access.");
   const requestedFields = unique(input.requestedFields); const requestedEvidenceTypes = unique(input.requestedEvidenceTypes);
   validateInput(requestedFields, requestedEvidenceTypes);
+  await enforceDisclosureAccess(user, requestedFields, requestedEvidenceTypes, "REQUEST");
   const business = await prisma.business.findUnique({ where: { gstin: input.businessGstin }, include: { user: true } });
   if (!business) throw new ApiError(404, "NOT_FOUND", "No business found with this GSTIN.");
   const consent = await prisma.consentRequest.create({ data: { requesterId: user.id, businessId: business.id, requestedFields: requestedFields as Prisma.InputJsonValue, requestedEvidenceTypes: requestedEvidenceTypes as Prisma.InputJsonValue, purpose: input.purpose }, include: { requester: true, business: true } });
@@ -69,6 +73,7 @@ export async function approve(userId: string, id: string, input: ApprovalInput) 
   if (consent.status !== ConsentStatus.PENDING) throw new ApiError(409, "CONFLICT", "Only pending requests can be approved.");
   const requestedFields = new Set(consent.requestedFields as string[]); const requestedEvidence = new Set((consent.requestedEvidenceTypes as string[]) ?? []);
   if (approvedFields.some((field) => !requestedFields.has(field)) || approvedEvidenceTypes.some((type) => !requestedEvidence.has(type))) throw new ApiError(400, "VALIDATION_ERROR", "Approved disclosures must be a subset of requested disclosures.");
+  await enforceDisclosureAccess(consent.requester, approvedFields, approvedEvidenceTypes, "APPROVAL");
   const passport = await prisma.passport.findFirst({ where: { businessId: consent.businessId }, orderBy: { version: "desc" } });
   if (!passport) throw new ApiError(409, "PROFILE_NOT_READY", "Business Trust Profile has not been generated yet.");
   const approvedAt = new Date(); const expiresAt = new Date(approvedAt.getTime() + input.durationDays * 86400000);

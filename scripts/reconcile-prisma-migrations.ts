@@ -112,6 +112,16 @@ const migrations = [
     tables: [],
     columns: { ConsentRequest: ["requestedEvidenceTypes", "approvedEvidenceTypes", "approvedPassportId"], AccessGrant: ["passportId"] },
     indexes: ["ConsentRequest_approvedPassportId_idx", "AccessGrant_passportId_idx"]
+  },
+  {
+    name: "202610170001_identity_assurance",
+    file: path.join(root, "prisma", "migrations", "202610170001_identity_assurance", "migration.sql"),
+    tables: ["RequesterAssurance", "RequesterAssuranceEvent"],
+    columns: {
+      RequesterAssurance: ["id", "userId", "status", "reviewedOrganizationName", "reviewBasis", "reviewedAt", "reviewerIdentifier", "authorizationBasis", "authorizationReference", "authorizationScope", "authorizationExpiresAt", "suspensionReason", "suspendedAt", "createdAt", "updatedAt"],
+      RequesterAssuranceEvent: ["id", "userId", "operatorId", "action", "previousStatus", "newStatus", "metadata", "createdAt"]
+    },
+    indexes: ["RequesterAssurance_userId_key", "RequesterAssurance_status_authorizationExpiresAt_idx", "RequesterAssuranceEvent_userId_createdAt_idx"]
   }
 ] as const;
 
@@ -302,11 +312,13 @@ export function reconcilePrismaMigrations(options: { deploy?: boolean; status?: 
     const evidenceComplete = verifyMigrationShape(db, migrations[3]);
     const accessComplete = verifyMigrationShape(db, migrations[4]);
     const purposeComplete = verifyMigrationShape(db, migrations[5]);
+    const assuranceComplete = verifyMigrationShape(db, migrations[6]);
     const trustApplied = applied.includes(migrations[0].name);
     const reportApplied = applied.includes(migrations[1].name);
     const evidenceApplied = applied.includes(migrations[3].name);
     const accessApplied = applied.includes(migrations[4].name);
     const purposeApplied = applied.includes(migrations[5].name);
+    const assuranceApplied = applied.includes(migrations[6].name);
 
     report.push(`Database: ${dbPath}`);
     report.push(`Datasource: sqlite`);
@@ -335,6 +347,9 @@ export function reconcilePrismaMigrations(options: { deploy?: boolean; status?: 
     if (purposeApplied && !purposeComplete) {
       throw new Error(`${migrations[5].name} is recorded as applied, but its schema objects are missing or incomplete.`);
     }
+    if (assuranceApplied && !assuranceComplete) {
+      throw new Error(`${migrations[6].name} is recorded as applied, but its schema objects are missing or incomplete.`);
+    }
     if (hasSourceVerifiedPromotion(db)) {
       throw new Error("Existing Document rows contain SOURCE_VERIFIED. Reconciliation will not bless unverifiable evidence state.");
     }
@@ -348,7 +363,7 @@ export function reconcilePrismaMigrations(options: { deploy?: boolean; status?: 
       return { state: "fresh", backupPath };
     }
 
-    if (trustApplied && reportApplied && evidenceApplied && accessApplied && purposeApplied && trustComplete && reportComplete && evidenceComplete && accessComplete && purposeComplete) {
+    if (trustApplied && reportApplied && evidenceApplied && accessApplied && purposeApplied && assuranceApplied && trustComplete && reportComplete && evidenceComplete && accessComplete && purposeComplete && assuranceComplete) {
       report.push("State: fully migrated and tracked");
       db.close();
       if (options.deploy ?? true) prismaDeploy();

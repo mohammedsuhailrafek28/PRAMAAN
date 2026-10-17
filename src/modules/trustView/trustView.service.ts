@@ -5,13 +5,14 @@ import { filterPassportFields } from "../../utils/fieldFilter.js";
 import { deriveEvidenceLifecycle } from "../evidence/evidence-lifecycle.service.js";
 import { writeAuditLog } from "../audit/audit.service.js";
 import { expireIfNeeded } from "../consent/consent.service.js";
+import { enforceDisclosureAccess, getForRequester, requesterIdentitySummary } from "../requesterAssurance/assurance.service.js";
 
 function safeEvidence(document: any) {
   return { docType: document.docType, evidenceStatus: document.evidenceStatus, confidence: document.confidence, crossCheckMethod: document.crossCheckMethod, source: document.source, issuedAt: document.issuedAt, checkedAt: document.checkedAt, expiresAt: document.expiresAt, uploadedAt: document.uploadedAt, lifecycle: deriveEvidenceLifecycle(document) };
 }
 
 export async function getTrustView(userId: string, consentRequestId: string) {
-  const found = await prisma.consentRequest.findUnique({ where: { id: consentRequestId }, include: { business: { include: { user: true } }, requester: { select: { id: true, name: true, role: true, organizationName: true } } } });
+  const found = await prisma.consentRequest.findUnique({ where: { id: consentRequestId }, include: { business: { include: { user: true } }, requester: { select: { id: true, name: true, role: true, organizationName: true, email: true } } } });
   if (!found) throw new ApiError(404, "NOT_FOUND", "Consent request not found.");
   let consent: any = found;
   if (consent.requesterId !== userId) throw new ApiError(403, "FORBIDDEN", "Only the original requester can open this Trust View.");
@@ -23,10 +24,11 @@ export async function getTrustView(userId: string, consentRequestId: string) {
   const passport = await prisma.passport.findUnique({ where: { id: consent.approvedPassportId } });
   if (!passport || passport.businessId !== consent.businessId) throw new ApiError(404, "NOT_FOUND", "Pinned Business Trust Profile not found.");
   const approvedFields = (consent.approvedFields ?? []) as string[];
-  const sharedFields = filterPassportFields(passport.snapshotJson, approvedFields);
   const evidenceTypes = ((consent.approvedEvidenceTypes ?? []) as string[]);
+  const assurance = await enforceDisclosureAccess(consent.requester, approvedFields, evidenceTypes, "ACCESS");
+  const sharedFields = filterPassportFields(passport.snapshotJson, approvedFields);
   const evidenceRows = evidenceTypes.length ? await prisma.document.findMany({ where: { businessId: consent.businessId, docType: { in: evidenceTypes as any }, uploadedAt: { lte: passport.generatedAt } }, orderBy: { uploadedAt: "desc" } }) : [];
   const evidence = evidenceRows.filter((document, index, rows) => rows.findIndex((candidate) => candidate.docType === document.docType) === index).map(safeEvidence);
   await writeAuditLog({ businessId: consent.businessId, actorId: userId, consentRequestId: consent.id, action: AuditAction.TRUST_VIEW_OPENED, dedupeWindowMs: 300000, metadata: { fields: Object.keys(sharedFields), evidenceTypes } });
-  return { businessId: consent.businessId, consentId: consent.id, sharedFields, metadata: { accessGrantedAt: consent.approvedAt, expiresAt: consent.expiresAt, purpose: consent.purpose, passportVersion: passport.version }, evidence };
+  return { businessId: consent.businessId, consentId: consent.id, requesterIdentity: requesterIdentitySummary(consent.requester, assurance), sharedFields, metadata: { accessGrantedAt: consent.approvedAt, expiresAt: consent.expiresAt, purpose: consent.purpose, passportVersion: passport.version }, evidence };
 }

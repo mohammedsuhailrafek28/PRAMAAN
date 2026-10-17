@@ -36,6 +36,10 @@ export async function register(input: RegisterInput) {
       business:
         input.role === UserRole.MSME
           ? { create: { legalName: input.organizationName } }
+          : undefined,
+      requesterAssurance:
+        input.role === UserRole.BUYER || input.role === UserRole.BANK
+          ? { create: { status: "UNVERIFIED" } }
           : undefined
     },
     select: { id: true, role: true, email: true, name: true, organizationName: true }
