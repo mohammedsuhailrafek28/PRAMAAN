@@ -216,8 +216,8 @@ try {
     const msme = await makeMsme({ gstExpiresInDays: 90 });
     const buyer = await makeBuyer("g");
     const passport = await passportService.generate(msme.user.id);
-    const consentId = await approvedConsent(msme, buyer, ["gstin"], ["GST_CERTIFICATE", "BANK_STATEMENT"]);
-    const guest = await guestToken(msme, ["gstin"], ["GST_CERTIFICATE", "BANK_STATEMENT"]);
+    const consentId = await approvedConsent(msme, buyer, ["gstin"], ["GST_CERTIFICATE", "UDYAM_CERTIFICATE"]);
+    const guest = await guestToken(msme, ["gstin"], ["GST_CERTIFICATE", "UDYAM_CERTIFICATE"]);
 
     // Rewrite to the pre-fix shape: no snapshotSchema, no embedded evidence.
     const legacy = { ...(passport.snapshotJson as Record<string, unknown>) };
