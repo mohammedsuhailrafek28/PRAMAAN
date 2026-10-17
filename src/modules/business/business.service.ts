@@ -1,4 +1,5 @@
 import { AuditAction, EvidenceStatus, UserRole, VerificationStatus, type DocumentType } from "@prisma/client";
+import { unlink } from "node:fs/promises";
 import { prisma } from "../../config/prisma.js";
 import { ApiError } from "../../utils/apiError.js";
 import { writeAuditLog } from "../audit/audit.service.js";
@@ -120,54 +121,103 @@ export async function uploadDocument(
   try {
     issuedAt = parseLifecycleDate(metadata.issuedAt, "issuedAt");
     expiresAt = parseLifecycleDate(metadata.expiresAt, "expiresAt");
+    if (issuedAt && expiresAt && expiresAt.getTime() < issuedAt.getTime()) {
+      throw new ApiError(400, "VALIDATION_ERROR", "expiresAt cannot be earlier than issuedAt.");
+    }
   } catch (error) {
+    await removeUploadedFile(file.path);
+    if (error instanceof ApiError) throw error;
     throw new ApiError(400, "VALIDATION_ERROR", error instanceof Error ? error.message : "Invalid lifecycle metadata.");
   }
-  if (issuedAt && expiresAt && expiresAt.getTime() < issuedAt.getTime()) {
-    throw new ApiError(400, "VALIDATION_ERROR", "expiresAt cannot be earlier than issuedAt.");
+
+  let document: any;
+  try {
+    const committed = await withDocumentRevisionRetry(() => prisma.$transaction(async (tx) => {
+      const previous = await tx.document.findFirst({
+        where: { businessId: business.id, docType, isCurrent: true },
+        orderBy: { revision: "desc" }
+      });
+
+      await tx.document.updateMany({ where: { businessId: business.id, docType, isCurrent: true }, data: { isCurrent: false } });
+      const created = await tx.document.create({
+        data: {
+          businessId: business.id,
+          docType,
+          filePath: file.path,
+          originalName: file.originalname,
+          mimeType: file.mimetype,
+          evidenceStatus: EvidenceStatus.DOCUMENT_SUBMITTED,
+          confidence: 45,
+          confidenceReason: "A supported evidence file was submitted. Its contents were not parsed or externally verified.",
+          issuedAt,
+          expiresAt,
+          source: metadata.source?.trim() || "MSME_SUBMITTED",
+          revision: (previous?.revision ?? 0) + 1,
+          isCurrent: true,
+          previousVersionId: previous?.id
+        }
+      });
+
+      await tx.auditLog.create({
+        data: {
+          businessId: business.id,
+          actorId: userId,
+          action: previous ? AuditAction.EVIDENCE_REPLACED : AuditAction.EVIDENCE_UPLOADED,
+          metadata: {
+            documentId: created.id,
+            documentType: created.docType,
+            evidenceStatus: created.evidenceStatus,
+            revision: created.revision,
+            replacedDocumentId: previous?.id
+          }
+        }
+      });
+      return { document: created };
+    }, { maxWait: 1000, timeout: 3000 }));
+    document = committed.document;
+  } catch (error) {
+    await removeUploadedFile(file.path);
+    if (isRetryableDocumentRevisionError(error)) {
+      throw new ApiError(503, "DOCUMENT_REVISION_BUSY", "Document revision is busy; please retry the upload.");
+    }
+    throw error;
   }
 
-  const previous = await prisma.document.findFirst({
-    where: { businessId: business.id, docType, isCurrent: true },
-    orderBy: { revision: "desc" }
-  });
-
-  const document = await prisma.$transaction(async (tx) => {
-    await tx.document.updateMany({ where: { businessId: business.id, docType, isCurrent: true }, data: { isCurrent: false } });
-    return tx.document.create({
-      data: {
-        businessId: business.id,
-        docType,
-        filePath: file.path,
-        originalName: file.originalname,
-        mimeType: file.mimetype,
-        evidenceStatus: EvidenceStatus.DOCUMENT_SUBMITTED,
-        confidence: 45,
-        confidenceReason: "A supported evidence file was submitted. Its contents were not parsed or externally verified.",
-        issuedAt,
-        expiresAt,
-        source: metadata.source?.trim() || "MSME_SUBMITTED",
-        revision: (previous?.revision ?? 0) + 1,
-        isCurrent: true,
-        previousVersionId: previous?.id
-      }
-    });
-  });
-
-  await writeAuditLog({
-    businessId: business.id,
-    actorId: userId,
-    action: previous ? AuditAction.EVIDENCE_REPLACED : AuditAction.EVIDENCE_UPLOADED,
-    metadata: {
-      documentId: document.id,
-      documentType: document.docType,
-      evidenceStatus: document.evidenceStatus,
-      revision: document.revision,
-      replacedDocumentId: previous?.id
-    }
-  });
-
   return serializeDocument(document);
+}
+
+const DOCUMENT_REVISION_RETRIES = 6;
+
+async function withDocumentRevisionRetry<T>(operation: () => Promise<T>) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < DOCUMENT_REVISION_RETRIES; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableDocumentRevisionError(error) || attempt === DOCUMENT_REVISION_RETRIES - 1) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
+function isRetryableDocumentRevisionError(error: unknown) {
+  const candidate = error as { code?: string; message?: string };
+  const message = candidate.message?.toLowerCase() ?? "";
+  return candidate.code === "P1008" || candidate.code === "P2002" || candidate.code === "P2028" || candidate.code === "P2034"
+    || message.includes("database is locked")
+    || message.includes("sqlite_busy")
+    || message.includes("write conflict")
+    || message.includes("deadlock");
+}
+
+async function removeUploadedFile(filePath: string) {
+  try {
+    await unlink(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
 }
 
 export async function crossCheck(user: Express.User) {

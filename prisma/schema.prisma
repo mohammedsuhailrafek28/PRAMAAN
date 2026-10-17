@@ -214,6 +214,7 @@ model Document {
 
   @@index([businessId, docType, isCurrent])
   @@index([previousVersionId])
+  @@unique([businessId, docType, revision])
 }
 
 model Passport {
