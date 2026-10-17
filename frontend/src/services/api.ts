@@ -41,6 +41,7 @@ const FRIENDLY_ERRORS: Record<string, string> = {
   CONFLICT: "This request has already been handled. Refresh to see its current state.",
   REQUESTER_NOT_VERIFIED: "Your organization is not yet reviewed for this kind of request. Remove the higher-sensitivity items, or ask Pramaan to review your authorization.",
   REQUESTER_RESTRICTED: "Your organization is not yet reviewed for this kind of request. Remove the higher-sensitivity items, or ask Pramaan to review your authorization.",
+  REQUESTER_ASSURANCE_REQUIRED: "Your requester assurance does not permit one or more higher-sensitivity items in this request.",
   REQUESTER_SUSPENDED: "Your account is suspended and cannot request information.",
   RATE_LIMITED: "Too many requests. Please wait a moment and try again.",
   INTERNAL_SERVER_ERROR: "Something went wrong on our side. Please try again.",

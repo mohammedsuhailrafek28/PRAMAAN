@@ -10,12 +10,10 @@
 // access: the backend enforces. Everything here is explanation, and it fails
 // conservatively: anything missing, malformed or expired reads as UNVERIFIED.
 //
-// Backend shape assumed (adapter below accepts it on `requesterIdentity`, or on
-// `requester.requesterIdentity`; field names other than these are ignored):
-//   { assurance: "UNVERIFIED"|"ORG_REVIEWED"|"AUTHORIZED"|"SUSPENDED",
-//     claimedOrganizationName?: string,   // what the requester typed at registration
-//     reviewedOrganizationName?: string,  // what a reviewer confirmed
-//     reviewedAt?: ISO date, expiresAt?: ISO date, basis?: string }
+// Backend shape accepted by the adapter:
+//   { status, displayName, reviewBasis, reviewedAt, authorizationExpiresAt }
+// The backend summary intentionally exposes the claimed/display name only;
+// absence of a reviewed organization name must not be filled in by the client.
 
 import type { StatusTone } from "@/lib/trustVocabulary";
 import type { DisclosureItem, DisclosureScope } from "@/lib/disclosure";
@@ -60,12 +58,16 @@ export function parseRequesterIdentity(raw: unknown, claimedFallback?: string): 
   if (typeof raw !== "object" || Array.isArray(raw)) return { level: "UNVERIFIED", claimedOrganization: claimedDefault, malformed: true };
 
   const record = raw as Record<string, unknown>;
-  const token = typeof record.assurance === "string" ? record.assurance.trim().toUpperCase() : "";
-  const claimedOrganization = cleanText(record.claimedOrganizationName) ?? claimedDefault;
+  const token = typeof (record.status ?? record.assurance) === "string"
+    ? String(record.status ?? record.assurance).trim().toUpperCase()
+    : "";
+  const claimedOrganization = cleanText(record.claimedOrganizationName)
+    ?? cleanText(record.displayName)
+    ?? claimedDefault;
   if (!LEVELS.includes(token as AssuranceLevel)) return { level: "UNVERIFIED", claimedOrganization, malformed: true };
 
   const reviewedAt = cleanDate(record.reviewedAt);
-  const expiresAt = cleanDate(record.expiresAt);
+  const expiresAt = cleanDate(record.expiresAt ?? record.authorizationExpiresAt);
   const level = token as AssuranceLevel;
   // A review whose dates we cannot read cannot be shown as in force.
   if ((level === "ORG_REVIEWED" || level === "AUTHORIZED") && (reviewedAt.invalid || expiresAt.invalid)) {
@@ -77,7 +79,7 @@ export function parseRequesterIdentity(raw: unknown, claimedFallback?: string): 
     reviewedOrganization: cleanText(record.reviewedOrganizationName),
     reviewedAt: reviewedAt.iso,
     expiresAt: expiresAt.iso,
-    basis: cleanText(record.basis),
+    basis: cleanText(record.basis) ?? cleanText(record.reviewBasis),
     malformed: false,
   };
 }

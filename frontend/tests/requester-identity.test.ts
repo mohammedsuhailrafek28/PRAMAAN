@@ -59,6 +59,25 @@ describe("parsing", () => {
     assert.equal(identityFromPayload({ requester: { requesterIdentity: { assurance: "ORG_REVIEWED" } } }).level, "ORG_REVIEWED");
     assert.equal(identityFromPayload({ requester: {} }).level, "UNVERIFIED");
   });
+
+  test("maps the backend requesterIdentity contract without inventing reviewed data", () => {
+    const parsed = identityFromPayload({
+      requesterIdentity: {
+        status: "AUTHORIZED",
+        displayName: "Claimed Bank Name",
+        reviewBasis: "independent-authority-review-001",
+        reviewedAt: "2026-10-12T00:00:00Z",
+        authorizationExpiresAt: FUTURE,
+        limitations: [],
+      },
+    });
+    assert.equal(parsed.level, "AUTHORIZED");
+    assert.equal(parsed.claimedOrganization, "Claimed Bank Name");
+    assert.equal(parsed.reviewedOrganization, undefined);
+    assert.equal(parsed.basis, "independent-authority-review-001");
+    assert.equal(parsed.expiresAt, new Date(FUTURE).toISOString());
+    assert.equal(parsed.malformed, false);
+  });
 });
 
 describe("expiry and suspension never look active", () => {
