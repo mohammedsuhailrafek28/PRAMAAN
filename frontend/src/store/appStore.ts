@@ -42,9 +42,11 @@ interface AppState {
   loadNotifications: () => Promise<void>;
   markNotificationRead: (id: string) => Promise<void>;
   clearError: () => void;
+  /** Drops every user-specific value. Called on login, logout, registration and session expiry. */
+  reset: () => void;
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+const INITIAL_STATE = {
   business: null,
   trustProfile: null,
   crossCheckResult: null,
@@ -54,13 +56,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   notifications: [],
   loading: false,
   error: null,
+} satisfies Partial<AppState>;
+
+// Bumped on every reset so responses that were in flight for the previous
+// user are discarded instead of repopulating the next user's session.
+let sessionEpoch = 0;
+
+export const useAppStore = create<AppState>((set, get) => ({
+  ...INITIAL_STATE,
+
+  reset: () => { sessionEpoch += 1; set({ ...INITIAL_STATE }); },
 
   loadBusiness: async () => {
+    const epoch = sessionEpoch;
     set({ loading: true, error: null });
     try {
       const [business, trustProfile] = await Promise.all([api.getBusiness(), api.getTrustProfile()]);
+      if (epoch !== sessionEpoch) return;
       set({ business, trustProfile, loading: false });
     } catch (error) {
+      if (epoch !== sessionEpoch) return;
       set({ loading: false, error: api.getApiError(error) });
     }
   },
@@ -100,13 +115,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   loadConsentRequests: async () => {
-    try { set({ consentRequests: await api.getIncomingRequests(), error: null }); }
-    catch (error) { set({ error: api.getApiError(error) }); }
+    const epoch = sessionEpoch;
+    try { const value = await api.getIncomingRequests(); if (epoch === sessionEpoch) set({ consentRequests: value, error: null }); }
+    catch (error) { if (epoch === sessionEpoch) set({ error: api.getApiError(error) }); }
   },
 
   loadAccessGrants: async () => {
-    try { set({ accessGrants: await api.getAccessGrants() }); }
-    catch (error) { set({ error: api.getApiError(error) }); }
+    const epoch = sessionEpoch;
+    try { const value = await api.getAccessGrants(); if (epoch === sessionEpoch) set({ accessGrants: value }); }
+    catch (error) { if (epoch === sessionEpoch) set({ error: api.getApiError(error) }); }
   },
 
   approveConsentRequest: async (id, scope, duration) => {
@@ -128,13 +145,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   loadAuditLogs: async () => {
-    try { set({ auditLogs: await api.getAuditLogs(), error: null }); }
-    catch (error) { set({ error: api.getApiError(error) }); }
+    const epoch = sessionEpoch;
+    try { const value = await api.getAuditLogs(); if (epoch === sessionEpoch) set({ auditLogs: value, error: null }); }
+    catch (error) { if (epoch === sessionEpoch) set({ error: api.getApiError(error) }); }
   },
 
   loadNotifications: async () => {
-    try { set({ notifications: await api.getNotifications(), error: null }); }
-    catch (error) { set({ error: api.getApiError(error) }); }
+    const epoch = sessionEpoch;
+    try { const value = await api.getNotifications(); if (epoch === sessionEpoch) set({ notifications: value, error: null }); }
+    catch (error) { if (epoch === sessionEpoch) set({ error: api.getApiError(error) }); }
   },
 
   markNotificationRead: async (id) => {

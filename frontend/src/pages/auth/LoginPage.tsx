@@ -13,6 +13,8 @@ import { useAuthStore } from "@/store/authStore";
 import type { Role } from "@/types";
 import { cn } from "@/lib/utils";
 import { getApiError } from "@/services/api";
+import { DEMO_MODE } from "@/lib/demoMode";
+import { homeForRole, parseRoleParam } from "@/lib/roles";
 import { useToast } from "@/components/ui/use-toast";
 
 const schema = z.object({
@@ -27,17 +29,11 @@ const ROLE_TABS: { role: Role; label: string; icon: typeof Building2 }[] = [
   { role: "bank", label: "Bank / NBFC", icon: Landmark },
 ];
 
-const ROLE_HOME: Record<Role, string> = {
-  msme: "/msme/dashboard",
-  buyer: "/buyer/dashboard",
-  bank: "/bank/dashboard",
-};
-
 export function LoginPage() {
   const [params] = useSearchParams();
-  const initialRole = (params.get("role") as Role) || "msme";
+  const initialRole = parseRoleParam(params.get("role"));
   const [role, setRole] = useState<Role>(initialRole);
-  const { loginAs, loading } = useAuthStore();
+  const { loginAs, loading, sessionExpired } = useAuthStore();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -49,8 +45,9 @@ export function LoginPage() {
 
   async function onSubmit(values: FormValues) {
     try {
-      await loginAs(role, values.email, values.password);
-      navigate(ROLE_HOME[role]);
+      // The account decides the destination; the tab above is only a label.
+      const user = await loginAs(values.email, values.password);
+      navigate(homeForRole(user.role));
     } catch (error) {
       toast({ title: "Login failed", description: getApiError(error), variant: "destructive" });
     }
@@ -84,6 +81,8 @@ export function LoginPage() {
             ))}
           </div>
 
+          {sessionExpired && <p role="alert" className="mb-4 rounded-md bg-warning-bg px-3 py-2 text-sm text-warning-foreground">Your session ended. Please log in again.</p>}
+
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
@@ -96,13 +95,15 @@ export function LoginPage() {
               {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Logging in…" : `Log in as ${ROLE_TABS.find((t) => t.role === role)?.label}`}
+              {loading ? "Logging in…" : "Log in"}
             </Button>
           </form>
 
-          <p className="mt-5 text-center text-xs text-muted-foreground">
-            Demo access: {role === "msme" ? "msme" : role === "buyer" ? "buyer" : "bank"}@pramaan.demo / password123
-          </p>
+          {DEMO_MODE && (
+            <p className="mt-5 text-center text-xs text-muted-foreground">
+              Demo access: {role === "msme" ? "msme" : role === "buyer" ? "buyer" : "bank"}@pramaan.demo / password123
+            </p>
+          )}
           <p className="mt-3 text-center text-sm text-muted-foreground">
             No account?{" "}
             <Link to={`/register?role=${role}`} className="font-medium text-primary-700 hover:underline">

@@ -2,19 +2,22 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, Repeat } from "lucide-react";
 
+import { useToast } from "@/components/ui/use-toast";
 import { useAuthStore } from "@/store/authStore";
+import { homeForRole } from "@/lib/roles";
 import type { Role } from "@/types";
 import { cn } from "@/lib/utils";
 
-const DEMO_IDENTITIES: { role: Role; label: string; sub: string }[] = [
+const DEMO_PASSWORD = "password123";
+const DEMO_IDENTITIES: { role: Role; label: string; sub: string; email: string }[] = [
   // Must match prisma/seed.ts demo accounts.
-  { role: "msme", label: "Ravi Sharma", sub: "Sharma Textiles (MSME)" },
-  { role: "buyer", label: "Ananya Iyer", sub: "Acme Retail Buyers (Buyer)" },
-  { role: "bank", label: "Karan Mehta", sub: "Kisan NBFC (Bank)" },
+  { role: "msme", label: "Ravi Sharma", sub: "Sharma Textiles (MSME)", email: "msme@pramaan.demo" },
+  { role: "buyer", label: "Ananya Iyer", sub: "Acme Retail Buyers (Buyer)", email: "buyer@pramaan.demo" },
+  { role: "bank", label: "Karan Mehta", sub: "Kisan NBFC (Bank)", email: "bank@pramaan.demo" },
 ];
 
 /**
- * Lets whoever is running the demo jump between the three seeded accounts
+ * Demo-only (rendered when VITE_DEMO_MODE=true). Lets whoever is running the demo jump between the three seeded accounts
  * instantly, without a real logout/login round trip — this is what makes
  * the MSME -> Buyer -> MSME -> Buyer demo flow fast to drive live.
  */
@@ -22,11 +25,16 @@ export function RoleSwitcher() {
   const [open, setOpen] = useState(false);
   const { currentUser, loginAs } = useAuthStore();
   const navigate = useNavigate();
+  const { toast } = useToast();
 
-  async function switchTo(role: Role) {
-    await loginAs(role);
+  async function switchTo(identity: (typeof DEMO_IDENTITIES)[number]) {
     setOpen(false);
-    navigate(role === "msme" ? "/msme/dashboard" : role === "buyer" ? "/buyer/dashboard" : "/bank/dashboard");
+    try {
+      const user = await loginAs(identity.email, DEMO_PASSWORD);
+      navigate(homeForRole(user.role));
+    } catch {
+      toast({ title: "Couldn't switch role", description: "Is the demo data seeded? Try npm run demo:reset.", variant: "destructive" });
+    }
   }
 
   return (
@@ -49,7 +57,7 @@ export function RoleSwitcher() {
             {DEMO_IDENTITIES.map((identity) => (
               <button
                 key={identity.role}
-                onClick={() => switchTo(identity.role)}
+                onClick={() => void switchTo(identity)}
                 className={cn(
                   "flex w-full flex-col items-start rounded-sm px-3 py-2 text-left text-sm hover:bg-surface",
                   currentUser?.role === identity.role && "bg-primary-50"

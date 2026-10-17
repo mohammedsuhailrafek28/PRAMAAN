@@ -4,6 +4,7 @@ import { Bell, LogOut } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { RoleSwitcher } from "@/components/layout/RoleSwitcher";
+import { DEMO_MODE } from "@/lib/demoMode";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { ROUTES, workspaceLabel } from "@/components/layout/navigation";
 import { useAuthStore } from "@/store/authStore";
@@ -52,7 +53,7 @@ export function Topbar() {
       </div>
 
       <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-        <RoleSwitcher />
+        {DEMO_MODE && <RoleSwitcher />}
 
         <div className="relative">
           <button

@@ -15,6 +15,7 @@ import { EvidenceStatusBadge } from "@/components/shared/EvidenceStatusBadge";
 import { useAppStore } from "@/store/appStore";
 import { TURNOVER_BANDS, type CrossCheckResult, type DocumentType } from "@/types";
 import { cn, formatDateTime } from "@/lib/utils";
+import { gstinSchema, panSchema, udyamSchema } from "@/lib/identifiers";
 import { backendFieldLabel, documentTypeLabel } from "@/lib/fieldLabels";
 import { NOT_EXTERNALLY_VERIFIED, describeEvidenceStatus } from "@/lib/trustVocabulary";
 import { getApiError } from "@/services/api";
@@ -22,9 +23,9 @@ import { useToast } from "@/components/ui/use-toast";
 
 const schema = z.object({
   legalName: z.string().min(2, "Enter the legal business name"),
-  gstin: z.string().regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/, "GSTIN must be a valid 15-character GSTIN"),
-  udyamNumber: z.string().regex(/^UDYAM-[A-Z]{2}-\d{2}-\d{7}$/, "Format: UDYAM-XX-00-0000000"),
-  pan: z.string().regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/, "PAN must be 10 characters, e.g. ABCDE1234F"),
+  gstin: gstinSchema,
+  udyamNumber: udyamSchema,
+  pan: panSchema,
   address: z.string().min(5, "Enter the registered address"),
   turnoverBand: z.string().min(1, "Select a turnover band"),
 });

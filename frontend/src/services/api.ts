@@ -8,18 +8,23 @@ import type {
 } from "@/types";
 import { formatSharedFields } from "@/lib/sharedFields";
 import { parseScope, type DisclosureScope } from "@/lib/disclosure";
+import { TOKEN_KEY, isSessionExpiry, notifyUnauthorized } from "@/services/session";
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:4000/api").replace(/\/$/, "");
 const client = axios.create({ baseURL: API_URL, timeout: 15000 });
 
 client.interceptors.request.use((config) => {
-  const token = localStorage.getItem("pramaan_access_token");
+  const token = localStorage.getItem(TOKEN_KEY);
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
 client.interceptors.response.use((response) => response, (error) => {
-  if (error.response?.status === 401) localStorage.removeItem("pramaan_access_token");
+  const sentToken = Boolean(error.config?.headers?.Authorization);
+  if (isSessionExpiry(error.response?.status, sentToken)) {
+    localStorage.removeItem(TOKEN_KEY);
+    notifyUnauthorized();
+  }
   return Promise.reject(error);
 });
 
@@ -152,19 +157,16 @@ function mapSharedEvidence(raw: any[] | undefined): SharedEvidence[] {
   }));
 }
 
-export async function login(role: Role, email?: string, password?: string): Promise<User> {
-  const defaults: Record<Role, [string, string]> = {
-    msme: ["msme@pramaan.demo", "password123"], buyer: ["buyer@pramaan.demo", "password123"], bank: ["bank@pramaan.demo", "password123"],
-  };
-  const [defaultEmail, defaultPassword] = defaults[role];
-  const { data } = await client.post("/auth/login", { email: email || defaultEmail, password: password || defaultPassword });
-  localStorage.setItem("pramaan_access_token", data.token);
+/** The role is decided by the account, not the caller; the returned user carries the real role. */
+export async function login(email: string, password: string): Promise<User> {
+  const { data } = await client.post("/auth/login", { email, password });
+  localStorage.setItem(TOKEN_KEY, data.token);
   return mapUser(data.user);
 }
 
 export async function register(input: { name: string; orgName: string; email: string; password: string; role: Role }): Promise<User> {
   const { data } = await client.post("/auth/register", { role: roleToApi[input.role], name: input.name, organizationName: input.orgName, email: input.email, password: input.password });
-  localStorage.setItem("pramaan_access_token", data.token);
+  localStorage.setItem(TOKEN_KEY, data.token);
   return mapUser(data.user);
 }
 

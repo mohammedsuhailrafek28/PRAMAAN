@@ -10,7 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useAuthStore } from "@/store/authStore";
-import * as api from "@/services/api";
+import { getApiError } from "@/services/api";
+import { homeForRole, parseRoleParam } from "@/lib/roles";
+import { useToast } from "@/components/ui/use-toast";
 import type { Role } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -34,18 +36,13 @@ const ROLE_TABS: { role: Role; label: string; icon: typeof Building2 }[] = [
   { role: "bank", label: "Bank / NBFC", icon: Landmark },
 ];
 
-const ROLE_HOME: Record<Role, string> = {
-  msme: "/msme/dashboard",
-  buyer: "/buyer/dashboard",
-  bank: "/bank/dashboard",
-};
-
 export function RegisterPage() {
   const [params] = useSearchParams();
-  const initialRole = (params.get("role") as Role) || "msme";
+  const initialRole = parseRoleParam(params.get("role"));
   const [role, setRole] = useState<Role>(initialRole);
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
+  const { toast } = useToast();
 
   const {
     register,
@@ -55,10 +52,14 @@ export function RegisterPage() {
 
   async function onSubmit(values: FormValues) {
     setSubmitting(true);
-    const user = await api.register({ name: values.name, orgName: values.orgName, email: values.email, password: values.password, role });
-    useAuthStore.setState({ currentUser: user });
-    setSubmitting(false);
-    navigate(ROLE_HOME[role]);
+    try {
+      const user = await useAuthStore.getState().registerAs({ name: values.name, orgName: values.orgName, email: values.email.trim(), password: values.password, role });
+      navigate(homeForRole(user.role));
+    } catch (error) {
+      toast({ title: "Couldn't create your account", description: getApiError(error), variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
