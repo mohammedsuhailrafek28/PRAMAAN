@@ -5,7 +5,7 @@ import { env } from "../../config/env.js";
 import { ApiError } from "../../utils/apiError.js";
 import { filterPassportFields } from "../../utils/fieldFilter.js";
 import { validateDisclosureKeys } from "../../utils/disclosureCatalogue.js";
-import { deriveEvidenceLifecycle } from "../evidence/evidence-lifecycle.service.js";
+import { readPinnedEvidence } from "../evidence/pinned-evidence.js";
 import { writeAuditLog } from "../audit/audit.service.js";
 import { enforceDisclosureAccess, requesterIdentitySummary, requiresIndependentAuthorization } from "../requesterAssurance/assurance.service.js";
 
@@ -110,25 +110,9 @@ export async function revoke(userId: string, id: string) {
   return toPublicGrant(updated);
 }
 
-function safeEvidence(document: any) {
-  const lifecycle = deriveEvidenceLifecycle(document);
-  return {
-    docType: document.docType,
-    evidenceStatus: document.evidenceStatus,
-    confidence: document.confidence,
-    crossCheckMethod: document.crossCheckMethod,
-    source: document.source,
-    issuedAt: document.issuedAt,
-    checkedAt: document.checkedAt,
-    expiresAt: document.expiresAt,
-    uploadedAt: document.uploadedAt,
-    lifecycle
-  };
-}
-
 export async function resolveGuest(token: string) {
   if (!/^[A-Za-z0-9_-]{40,}$/.test(token)) throw new ApiError(404, "INVALID_ACCESS_LINK", "This access link is not valid.");
-  const grant = await prisma.accessGrant.findUnique({ where: { tokenHash: tokenDigest(token) }, include: { requester: { select: { id: true, role: true, name: true, organizationName: true, email: true } }, business: { include: { passports: true, documents: { orderBy: { uploadedAt: "desc" } } } } } });
+  const grant = await prisma.accessGrant.findUnique({ where: { tokenHash: tokenDigest(token) }, include: { requester: { select: { id: true, role: true, name: true, organizationName: true, email: true } }, business: { include: { passports: true } } } });
   if (!grant) throw new ApiError(404, "INVALID_ACCESS_LINK", "This access link is not valid.");
   if (grant.revokedAt || grant.status === AccessGrantStatus.REVOKED) throw new ApiError(410, "ACCESS_REVOKED", "This access link was revoked by the business.");
   if (grant.expiresAt <= new Date()) {
@@ -142,17 +126,20 @@ export async function resolveGuest(token: string) {
   const assurance = requester ? await enforceDisclosureAccess(requester, scope.fields, scope.evidenceTypes, "ACCESS") : null;
   const snapshot = grant.business.passports?.find((item) => item.id === grant.passportId)?.snapshotJson;
   if (!snapshot) throw new ApiError(410, "PROFILE_SNAPSHOT_UNAVAILABLE", "The pinned Trust Profile snapshot is unavailable.");
+  const passport = grant.business.passports?.find((item) => item.id === grant.passportId);
+  if (!passport) throw new ApiError(410, "PROFILE_SNAPSHOT_UNAVAILABLE", "The pinned Trust Profile snapshot is unavailable.");
   const fields = filterPassportFields(snapshot, scope.fields);
-  const evidenceRows = grant.business.documents.filter((document) => scope.evidenceTypes.includes(document.docType) && document.uploadedAt <= (grant.business.passports.find((item) => item.id === grant.passportId)?.generatedAt ?? new Date(0)));
-  const evidence = evidenceRows.filter((document, index, rows) => rows.findIndex((candidate) => candidate.docType === document.docType) === index).map(safeEvidence);
+  // Evidence and identity come from the pinned snapshot only: no Business or Document row is read.
+  const { evidence, basis: evidenceBasis } = readPinnedEvidence(snapshot, scope.evidenceTypes);
+  const disclosed = (key: string) => (fields[key] as { value?: unknown } | undefined)?.value;
   const viewedAt = new Date();
   await prisma.accessGrant.update({ where: { id: grant.id }, data: { lastAccessedAt: viewedAt } });
   await writeAuditLog({ businessId: grant.businessId, actorId: grant.createdByUserId, accessGrantId: grant.id, action: AuditAction.GUEST_LINK_OPENED, dedupeWindowMs: 300000, metadata: { accessType: "guest", viewedAt: viewedAt.toISOString(), fields: Object.keys(fields), evidenceTypes: evidence.map((item) => item.docType) } });
   return {
-    grant: { id: grant.id, purpose: grant.purpose, recipientName: grant.recipientName, recipientOrganization: grant.recipientOrganization, createdAt: grant.createdAt, expiresAt: grant.expiresAt, profileVersion: grant.business.passports.find((item) => item.id === grant.passportId)?.version, requesterIdentity: requester ? requesterIdentitySummary(requester, assurance) : null },
+    grant: { id: grant.id, purpose: grant.purpose, recipientName: grant.recipientName, recipientOrganization: grant.recipientOrganization, createdAt: grant.createdAt, expiresAt: grant.expiresAt, profileVersion: passport.version, evidenceBasis, requesterIdentity: requester ? requesterIdentitySummary(requester, assurance) : null },
     business: {
-      legalName: scope.fields.includes("legalBusinessName") ? grant.business.legalName : undefined,
-      gstin: scope.fields.includes("gstin") ? grant.business.gstin : undefined
+      legalName: scope.fields.includes("legalBusinessName") ? disclosed("legalBusinessName") : undefined,
+      gstin: scope.fields.includes("gstin") ? disclosed("gstin") : undefined
     },
     sharedFields: fields,
     evidence

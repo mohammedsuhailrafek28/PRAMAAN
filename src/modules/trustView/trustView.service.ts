@@ -2,14 +2,10 @@ import { AuditAction, ConsentStatus } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { ApiError } from "../../utils/apiError.js";
 import { filterPassportFields } from "../../utils/fieldFilter.js";
-import { deriveEvidenceLifecycle } from "../evidence/evidence-lifecycle.service.js";
+import { readPinnedEvidence } from "../evidence/pinned-evidence.js";
 import { writeAuditLog } from "../audit/audit.service.js";
 import { expireIfNeeded } from "../consent/consent.service.js";
 import { enforceDisclosureAccess, getForRequester, requesterIdentitySummary } from "../requesterAssurance/assurance.service.js";
-
-function safeEvidence(document: any) {
-  return { docType: document.docType, evidenceStatus: document.evidenceStatus, confidence: document.confidence, crossCheckMethod: document.crossCheckMethod, source: document.source, issuedAt: document.issuedAt, checkedAt: document.checkedAt, expiresAt: document.expiresAt, uploadedAt: document.uploadedAt, lifecycle: deriveEvidenceLifecycle(document) };
-}
 
 export async function getTrustView(userId: string, consentRequestId: string) {
   const found = await prisma.consentRequest.findUnique({ where: { id: consentRequestId }, include: { business: { include: { user: true } }, requester: { select: { id: true, name: true, role: true, organizationName: true, email: true } } } });
@@ -27,8 +23,9 @@ export async function getTrustView(userId: string, consentRequestId: string) {
   const evidenceTypes = ((consent.approvedEvidenceTypes ?? []) as string[]);
   const assurance = await enforceDisclosureAccess(consent.requester, approvedFields, evidenceTypes, "ACCESS");
   const sharedFields = filterPassportFields(passport.snapshotJson, approvedFields);
-  const evidenceRows = evidenceTypes.length ? await prisma.document.findMany({ where: { businessId: consent.businessId, docType: { in: evidenceTypes as any }, uploadedAt: { lte: passport.generatedAt } }, orderBy: { uploadedAt: "desc" } }) : [];
-  const evidence = evidenceRows.filter((document, index, rows) => rows.findIndex((candidate) => candidate.docType === document.docType) === index).map(safeEvidence);
+  // Evidence comes from the pinned snapshot only. Document rows are never read, so later uploads,
+  // replacements, cross-checks or expiries cannot change what this consent disclosed.
+  const { evidence, basis: evidenceBasis } = readPinnedEvidence(passport.snapshotJson, evidenceTypes);
   await writeAuditLog({ businessId: consent.businessId, actorId: userId, consentRequestId: consent.id, action: AuditAction.TRUST_VIEW_OPENED, dedupeWindowMs: 300000, metadata: { fields: Object.keys(sharedFields), evidenceTypes } });
-  return { businessId: consent.businessId, consentId: consent.id, requesterIdentity: requesterIdentitySummary(consent.requester, assurance), sharedFields, metadata: { accessGrantedAt: consent.approvedAt, expiresAt: consent.expiresAt, purpose: consent.purpose, passportVersion: passport.version }, evidence };
+  return { businessId: consent.businessId, consentId: consent.id, requesterIdentity: requesterIdentitySummary(consent.requester, assurance), sharedFields, metadata: { accessGrantedAt: consent.approvedAt, expiresAt: consent.expiresAt, purpose: consent.purpose, passportVersion: passport.version, evidenceBasis }, evidence };
 }
