@@ -10,8 +10,8 @@ const frontend = readFileSync(path.resolve(here, "../src/lib/disclosure.ts"), "u
 
 function parse(source, keyPattern) {
   const items = new Map();
-  for (const match of source.matchAll(new RegExp(`key: ${keyPattern}, label: "([^"]+)"[^}]*kind: "(FIELD|EVIDENCE)"`, "g"))) {
-    items.set(match[1], `${match[3]}:${match[2]}`);
+  for (const match of source.matchAll(new RegExp(`key: ${keyPattern}, label: "([^"]+)"[^}]*?sensitivity: "(LOW|MEDIUM|HIGH)"[^}]*?kind: "(FIELD|EVIDENCE)"`, "g"))) {
+    items.set(match[1], `${match[4]}:${match[2]}:${match[3]}`);
   }
   return items;
 }

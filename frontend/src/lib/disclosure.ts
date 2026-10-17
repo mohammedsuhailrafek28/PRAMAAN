@@ -12,24 +12,26 @@ export interface DisclosureItem<K extends string = string> {
   key: K;
   label: string;
   kind: DisclosureKind;
+  /** Mirrors the backend catalogue; used only to explain which requests need a reviewed requester. */
+  sensitivity: "LOW" | "MEDIUM" | "HIGH";
   /** Plain-language explanation of what the recipient sees. */
   description: string;
 }
 
 export const FIELD_DISCLOSURES: readonly DisclosureItem<FieldKey>[] = [
-  { key: "legalBusinessName", label: "Legal business name", kind: "FIELD", description: "The registered name of the business." },
-  { key: "ownerName", label: "Owner name", kind: "FIELD", description: "Name of the account owner." },
-  { key: "gstin", label: "GSTIN", kind: "FIELD", description: "The GSTIN value only. No certificate details." },
-  { key: "udyamNumber", label: "Udyam number", kind: "FIELD", description: "The Udyam registration number only. No certificate details." },
-  { key: "address", label: "Business address", kind: "FIELD", description: "Registered business address." },
-  { key: "turnoverBand", label: "Turnover band", kind: "FIELD", description: "Self-declared annual turnover range." },
-  { key: "summary", label: "Trust summary", kind: "FIELD", description: "Trust readiness, completeness, evidence strength, consistency and freshness scores." },
+  { key: "legalBusinessName", label: "Legal business name", sensitivity: "LOW", kind: "FIELD", description: "The registered name of the business." },
+  { key: "ownerName", label: "Owner name", sensitivity: "MEDIUM", kind: "FIELD", description: "Name of the account owner." },
+  { key: "gstin", label: "GSTIN", sensitivity: "MEDIUM", kind: "FIELD", description: "The GSTIN value only. No certificate details." },
+  { key: "udyamNumber", label: "Udyam number", sensitivity: "MEDIUM", kind: "FIELD", description: "The Udyam registration number only. No certificate details." },
+  { key: "address", label: "Business address", sensitivity: "MEDIUM", kind: "FIELD", description: "Registered business address." },
+  { key: "turnoverBand", label: "Turnover band", sensitivity: "HIGH", kind: "FIELD", description: "Self-declared annual turnover range." },
+  { key: "summary", label: "Trust summary", sensitivity: "MEDIUM", kind: "FIELD", description: "Trust readiness, completeness, evidence strength, consistency and freshness scores." },
 ];
 
 export const EVIDENCE_DISCLOSURES: readonly DisclosureItem<EvidenceKey>[] = [
-  { key: "GST_CERTIFICATE", label: "GST certificate evidence", kind: "EVIDENCE", description: "Check status, source and dates of the GST certificate as of the shared Trust Profile version. Never the file itself." },
-  { key: "UDYAM_CERTIFICATE", label: "Udyam certificate evidence", kind: "EVIDENCE", description: "Check status, source and dates of the Udyam certificate as of the shared Trust Profile version. Never the file itself." },
-  { key: "BANK_STATEMENT", label: "Bank statement evidence", kind: "EVIDENCE", description: "Check status, source and dates of the bank statement as of the shared Trust Profile version. Never the file itself." },
+  { key: "GST_CERTIFICATE", label: "GST certificate evidence", sensitivity: "MEDIUM", kind: "EVIDENCE", description: "Check status, source and dates of the GST certificate as of the shared Trust Profile version. Never the file itself." },
+  { key: "UDYAM_CERTIFICATE", label: "Udyam certificate evidence", sensitivity: "MEDIUM", kind: "EVIDENCE", description: "Check status, source and dates of the Udyam certificate as of the shared Trust Profile version. Never the file itself." },
+  { key: "BANK_STATEMENT", label: "Bank statement evidence", sensitivity: "HIGH", kind: "EVIDENCE", description: "Check status, source and dates of the bank statement as of the shared Trust Profile version. Never the file itself." },
 ];
 
 export const FIELD_KEYS = FIELD_DISCLOSURES.map((item) => item.key);

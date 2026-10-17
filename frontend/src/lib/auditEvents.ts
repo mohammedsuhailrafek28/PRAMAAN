@@ -26,6 +26,7 @@ import {
 import { backendFieldLabel, documentTypeLabel } from "@/lib/fieldLabels";
 import { parseScope, scopeLabelPhrase, scopeSize } from "@/lib/disclosure";
 import { describeEvidenceStatus, humanize } from "@/lib/trustVocabulary";
+import { identityFromPayload, identityQualifier } from "@/lib/requesterIdentity";
 import { formatDateTime, formatDurationDays, possessive } from "@/lib/utils";
 import type { AuditLogEntry } from "@/types";
 
@@ -53,8 +54,15 @@ interface AuditEventDefinition {
 type Meta = Record<string, unknown>;
 const meta = (entry: AuditLogEntry): Meta => entry.metadata ?? {};
 const text = (value: unknown): string | undefined => (typeof value === "string" && value.trim() ? value : undefined);
-const requester = (entry: AuditLogEntry) => entry.requester?.organization || entry.requester?.name || "A verifier";
-const actorOrg = (entry: AuditLogEntry) => entry.actor?.organization || entry.actor?.name || "A verifier";
+// Prefer the assurance recorded when the event happened (metadata.requesterIdentity, if the backend
+// supplies it); otherwise the requester's current status, which can differ from what the business saw then.
+const withQualifier = (name: string, entry: AuditLogEntry, current?: AuditLogEntry["requester"]) => {
+  const atTime = meta(entry).requesterIdentity;
+  const identity = atTime !== undefined ? identityFromPayload({ requesterIdentity: atTime }) : current?.identity;
+  return identity ? `${name}${identityQualifier(identity)}` : name;
+};
+const requester = (entry: AuditLogEntry) => withQualifier(entry.requester?.organization || entry.requester?.name || "A verifier", entry, entry.requester);
+const actorOrg = (entry: AuditLogEntry) => withQualifier(entry.actor?.organization || entry.actor?.name || "A verifier", entry, entry.actor);
 const scopeOf = (fields: unknown, evidence: unknown) => parseScope(fields, evidence).scope;
 const docLabel = (entry: AuditLogEntry) => (text(meta(entry).documentType) ? documentTypeLabel(String(meta(entry).documentType)).toLowerCase() : "evidence");
 

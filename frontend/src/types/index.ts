@@ -6,6 +6,8 @@ import type { DisclosureScope } from "@/lib/disclosure";
 
 export type Role = "msme" | "buyer" | "bank";
 
+import type { RequesterIdentity } from "@/lib/requesterIdentity";
+
 export interface User {
   id: string;
   role: Role;
@@ -13,6 +15,8 @@ export interface User {
   orgName: string;
   email: string;
   avatarInitials: string;
+  /** Buyers and banks only: how well Pramaan knows this account. Absent for MSMEs. */
+  requesterIdentity?: RequesterIdentity;
 }
 
 export type EvidenceStatus = "SELF_DECLARED" | "DOCUMENT_SUBMITTED" | "CROSS_CHECKED" | "SOURCE_VERIFIED" | "REJECTED" | "EXPIRED";
@@ -165,6 +169,8 @@ export interface ConsentRequest {
   requesterId: string;
   requesterName: string;
   requesterRole?: Extract<Role, "buyer" | "bank">;
+  /** How well Pramaan knows the requester. Always present; defaults to UNVERIFIED. */
+  requesterIdentity: RequesterIdentity;
   purpose?: string;
   requested: DisclosureScope;
   approved: DisclosureScope;
@@ -179,6 +185,7 @@ export interface ConsentRequest {
 }
 
 export interface AuditActor {
+  identity?: RequesterIdentity;
   name?: string;
   organization?: string;
   role?: Role;

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, LogOut } from "lucide-react";
 
+import { RequesterIdentityBadge } from "@/components/shared/RequesterIdentityBadge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { RoleSwitcher } from "@/components/layout/RoleSwitcher";
 import { DEMO_MODE } from "@/lib/demoMode";
@@ -15,7 +16,7 @@ import type { Notification } from "@/types";
 /** Workspace context, notifications and account. Pages own their h1 (PageHeader). */
 export function Topbar() {
   const { currentUser, logout } = useAuthStore();
-  const { notifications, loadNotifications, markNotificationRead } = useAppStore();
+  const { notifications, consentRequests, loadNotifications, loadConsentRequests, markNotificationRead } = useAppStore();
   const navigate = useNavigate();
   const [bellOpen, setBellOpen] = useState(false);
   const bellButton = useRef<HTMLButtonElement>(null);
@@ -23,6 +24,11 @@ export function Topbar() {
   useEffect(() => {
     if (currentUser) loadNotifications();
   }, [currentUser, loadNotifications]);
+
+  // Notification text repeats the name the requester typed. Show how they were actually checked alongside it.
+  useEffect(() => {
+    if (bellOpen && currentUser?.role === "msme") void loadConsentRequests();
+  }, [bellOpen, currentUser?.role, loadConsentRequests]);
 
   useEffect(() => {
     if (!bellOpen) return;
@@ -88,6 +94,12 @@ export function Topbar() {
                         <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", n.read ? "bg-transparent" : "bg-primary-700")} aria-hidden />
                         <span className="min-w-0">
                           <span className="block text-slate-800">{n.message}</span>
+                          {currentUser?.role === "msme" && n.relatedConsentId && (() => {
+                            const related = consentRequests.find((request) => request.id === n.relatedConsentId);
+                            return related
+                              ? <span className="mt-1 block"><RequesterIdentityBadge identity={related.requesterIdentity} /></span>
+                              : <span className="mt-1 block text-xs text-slate-500">Open the request to see how this requester was checked.</span>;
+                          })()}
                           <span className="mt-0.5 block text-xs text-slate-500">{timeAgo(n.createdAt)}{!n.read && <span className="sr-only">, unread</span>}</span>
                         </span>
                       </button>

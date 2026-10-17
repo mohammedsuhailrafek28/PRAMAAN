@@ -6,6 +6,7 @@ import { isTrustProfileOutdated } from "@/lib/evidenceSlots";
 import { ROUTES } from "@/components/layout/navigation";
 import { formatDate, possessive } from "@/lib/utils";
 import { scopeLabelPhrase } from "@/lib/disclosure";
+import { identityNote } from "@/lib/requesterIdentity";
 import type { Business, ConsentRequest, TrustProfile } from "@/types";
 
 export type ActionTone = "negative" | "warning" | "info";
@@ -48,7 +49,7 @@ export function deriveNextActions(input: {
       id: `request-${request.id}`,
       tone: "info",
       title: `Review ${possessive(request.requesterName)} request`,
-      description: `${request.purpose || "Verification"} · asks for ${scopeLabelPhrase(request.requested)}. Nothing is shared until you decide.`,
+      description: `${request.purpose || "Verification"} · asks for ${scopeLabelPhrase(request.requested)}${identityNote(request.requesterIdentity) ? ` (requester ${identityNote(request.requesterIdentity)})` : ""}. Nothing is shared until you decide.`,
       cta: "Review request",
       to: ROUTES.consent,
     });
