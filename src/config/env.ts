@@ -1,10 +1,11 @@
 import dotenv from "dotenv";
 import { z } from "zod";
+import { productionJwtSecretError } from "./jwtSecretPolicy.js";
 
 dotenv.config();
 
 const nodeEnv = process.env.NODE_ENV ?? "development";
-const configuredJwtSecret = process.env.JWT_SECRET ?? (nodeEnv === "production" ? undefined : "dev-secret-change-me");
+const configuredJwtSecret = process.env.JWT_SECRET ?? "dev-secret-change-me";
 
 const envSchema = z.object({
   DATABASE_URL: z.string().default("file:./dev.db"),
@@ -18,8 +19,9 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().default(1000),
   PUBLIC_APP_URL: z.string().default("http://localhost:5173")
 }).superRefine((value, context) => {
-  if (value.NODE_ENV === "production" && (!process.env.JWT_SECRET || value.JWT_SECRET === "dev-secret-change-me")) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ["JWT_SECRET"], message: "JWT_SECRET must be explicitly configured in production." });
+  if (value.NODE_ENV === "production") {
+    const error = productionJwtSecretError(process.env.JWT_SECRET);
+    if (error) context.addIssue({ code: z.ZodIssueCode.custom, path: ["JWT_SECRET"], message: error });
   }
 });
 

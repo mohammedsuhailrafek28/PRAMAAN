@@ -33,6 +33,10 @@ Important truth rule: PRAMAAN does not mark submitted data as externally verifie
 - helmet, CORS, and API rate limiting
 - Playwright Chromium for private HTML-to-PDF report rendering
 
+## Production JWT secrets
+
+Production startup requires an explicitly supplied `JWT_SECRET`. It must be at least 32 characters, must not use a known development/demo value, and must not be repetitive or low-variety. Length alone does not guarantee entropy; generate the value with a cryptographically secure password or secret manager and keep it outside source control.
+
 ## Setup
 
 ```bash
