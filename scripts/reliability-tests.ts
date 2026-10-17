@@ -21,6 +21,14 @@ function pass(message: string) { console.log(`PASS ${message}`); }
 function fail(message: string) { failures += 1; console.log(`FAIL ${message}`); }
 function assert(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message); }
 
+function userIdFromToken(token: string) {
+  return JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8")).sub as string;
+}
+
+function operator(args: string[]) {
+  run("npx", ["tsx", "scripts/requester-assurance.ts", ...args]);
+}
+
 function run(command: string, args: string[]) {
   const executable = process.platform === "win32" ? `${command}.cmd` : command;
   execSync([executable, ...args].join(" "), { cwd: root, stdio: "inherit", env: { ...process.env, DATABASE_URL: databaseUrl, UPLOAD_DIR: uploadDir } });
@@ -153,6 +161,9 @@ async function main() {
     assert(oldView.data.metadata.passportVersion === passportV1.data.version, "registered consent shifted to latest profile");
     assert(oldView.data.sharedFields.gstin.value === profile.gstin, "old consent value changed after replacement");
     assert(passportV2.data.version > passportV1.data.version, "v2 was not generated");
+    const buyerAId = userIdFromToken(buyerA);
+    operator(["review", "--user-id", buyerAId, "--operator-id", "reliability-operator-review", "--review-basis", "synthetic-reliability-review"]);
+    operator(["authorize", "--user-id", buyerAId, "--operator-id", "reliability-operator-authorize", "--authorization-basis", "synthetic-reliability-authority-review", "--authorization-reference", "synthetic-reliability-reference", "--expires-at", new Date(Date.now() + 86400000).toISOString(), "--scope-fields", "turnoverBand"]);
     const newConsent = await request("POST", "/api/consent-requests", { token: buyerA, body: { businessGstin: profile.gstin, requestedFields: ["turnoverBand"], purpose: "Vendor Onboarding" } });
     const newConsentId = newConsent.data.consentRequestId as string;
     await request("PATCH", `/api/consent-requests/${newConsentId}/approve`, { token: msmeA, body: { approvedFields: ["turnoverBand"], durationDays: 7 } });
