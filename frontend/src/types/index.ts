@@ -262,7 +262,7 @@ export interface SharedField {
 }
 
 export interface GuestVerificationView {
-  grant: { id: string; purpose: string; recipientName?: string; recipientOrganization?: string; createdAt: string; expiresAt: string; profileVersion?: number };
+  grant: { id: string; purpose: string; recipientName?: string; recipientOrganization?: string; createdAt: string; expiresAt: string; profileVersion?: number; evidenceBasis?: "SNAPSHOT" | "LEGACY_SNAPSHOT" };
   business: { legalName?: string; gstin?: string };
   fields: SharedField[];
   evidence: SharedEvidence[];
@@ -279,6 +279,7 @@ export type TrustViewResult =
       purpose?: string;
       /** Version of the Trust Profile snapshot pinned when consent was approved. */
       profileVersion?: number;
+      evidenceBasis?: "SNAPSHOT" | "LEGACY_SNAPSHOT";
       fields: SharedField[];
       evidence: SharedEvidence[];
     }

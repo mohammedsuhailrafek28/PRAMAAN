@@ -39,7 +39,7 @@ export function SharedFieldRow({ field }: { field: SharedField }) {
 }
 
 /** One disclosed evidence item: never the file, only its check status, freshness and dates. */
-export function SharedEvidenceRow({ evidence }: { evidence: SharedEvidence }) {
+export function SharedEvidenceRow({ evidence, evidenceBasis }: { evidence: SharedEvidence; evidenceBasis?: "SNAPSHOT" | "LEGACY_SNAPSHOT" }) {
   return (
     <div className="rounded-lg border border-slate-200 p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -49,7 +49,7 @@ export function SharedEvidenceRow({ evidence }: { evidence: SharedEvidence }) {
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs sm:grid-cols-4">
         <div><dt className="text-slate-500">Source</dt><dd className="text-slate-800">{describeSource(evidence.source)}</dd></div>
         <div><dt className="text-slate-500">Issued</dt><dd className="text-slate-800">{formatDate(evidence.issuedAt)}</dd></div>
-        <div><dt className="text-slate-500">Expires</dt><dd className="text-slate-800">{evidence.expiresAt ? formatDate(evidence.expiresAt) : "No expiry recorded"}</dd></div>
+        <div><dt className="text-slate-500">Expires</dt><dd className="text-slate-800">{evidence.expiresAt ? formatDate(evidence.expiresAt) : evidenceBasis === "LEGACY_SNAPSHOT" ? "Not captured in historical snapshot" : "No expiry date"}</dd></div>
         <div><dt className="text-slate-500">Last checked</dt><dd className="text-slate-800">{formatDate(evidence.checkedAt)}</dd></div>
       </dl>
     </div>

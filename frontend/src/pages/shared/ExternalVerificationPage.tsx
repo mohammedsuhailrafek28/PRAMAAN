@@ -96,7 +96,7 @@ export function ExternalVerificationPage() {
         )}
         {view.evidence.length > 0 && (
           <SectionCard title="Shared evidence" description="Check status, freshness and dates only. Document files are never shared.">
-            <div className="space-y-3">{view.evidence.map((evidence) => <SharedEvidenceRow key={`${evidence.docType}-${evidence.uploadedAt}`} evidence={evidence} />)}</div>
+            <div className="space-y-3">{view.evidence.map((evidence) => <SharedEvidenceRow key={`${evidence.docType}-${evidence.uploadedAt}`} evidence={evidence} evidenceBasis={view.grant.evidenceBasis} />)}</div>
           </SectionCard>
         )}
 

@@ -248,6 +248,7 @@ export async function getTrustView(consentId: string): Promise<TrustViewResult> 
       state: "active", consentId, businessName: name || "Shared business information",
       grantedAt: data.metadata.accessGrantedAt, expiresAt: data.metadata.expiresAt, purpose: data.metadata.purpose || undefined,
       profileVersion: typeof data.metadata.passportVersion === "number" ? data.metadata.passportVersion : undefined,
+      evidenceBasis: data.metadata.evidenceBasis === "LEGACY_SNAPSHOT" ? "LEGACY_SNAPSHOT" : "SNAPSHOT",
       fields, evidence: mapSharedEvidence(data.evidence),
     };
   } catch (error) {
@@ -294,7 +295,7 @@ const GUEST_FAILURES: Record<string, GuestLinkFailure> = {
 export async function getGuestVerification(token: string): Promise<{ view: GuestVerificationView } | { failure: GuestLinkFailure }> {
   try {
     const { data } = await axios.get(`${API_URL}/public/verify/${encodeURIComponent(token)}`, { timeout: 15000 });
-    return { view: { grant: data.grant, business: data.business || {}, fields: formatSharedFields(data.sharedFields), evidence: mapSharedEvidence(data.evidence) } };
+    return { view: { grant: { ...data.grant, evidenceBasis: data.grant.evidenceBasis === "LEGACY_SNAPSHOT" ? "LEGACY_SNAPSHOT" : "SNAPSHOT" }, business: data.business || {}, fields: formatSharedFields(data.sharedFields), evidence: mapSharedEvidence(data.evidence) } };
   } catch (error) {
     const code = getApiErrorCode(error);
     if (code && GUEST_FAILURES[code]) return { failure: GUEST_FAILURES[code] };

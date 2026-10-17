@@ -134,7 +134,7 @@ export function DynamicTrustViewPage() {
           )}
           {active.evidence.length > 0 && (
             <SectionCard title="Shared evidence" description={`Check status, freshness and dates as of Trust Profile v${active.profileVersion ?? "—"}. Document files are never shared.`}>
-              <div className="space-y-3">{active.evidence.map((evidence) => <SharedEvidenceRow key={`${evidence.docType}-${evidence.uploadedAt}`} evidence={evidence} />)}</div>
+              <div className="space-y-3">{active.evidence.map((evidence) => <SharedEvidenceRow key={`${evidence.docType}-${evidence.uploadedAt}`} evidence={evidence} evidenceBasis={active.evidenceBasis} />)}</div>
             </SectionCard>
           )}
           {active.fields.length === 0 && active.evidence.length === 0 && (
