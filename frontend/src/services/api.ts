@@ -170,6 +170,7 @@ function mapGrant(raw: any): AccessGrant {
 }
 
 function mapTrustProfile(snapshot: any, fallbackId?: string): TrustProfile {
+  const schemaMarkerAbsent = snapshot !== null && typeof snapshot === "object" && !Object.prototype.hasOwnProperty.call(snapshot, "snapshotSchema");
   return {
     id: snapshot?.profileId || fallbackId, businessId: snapshot?.businessId, version: snapshot?.version || 1,
     generatedAt: snapshot?.generatedAt, lastCalculatedAt: snapshot?.lastCalculatedAt,
@@ -180,10 +181,10 @@ function mapTrustProfile(snapshot: any, fallbackId?: string): TrustProfile {
     contradictions: mapContradictions(snapshot?.contradictions),
     limitations: Array.isArray(snapshot?.limitations) ? snapshot.limitations.map(String) : [],
     sourceVerificationPerformed: false,
-    // Absent marker = genuine legacy snapshot. A marker that is present but not a number is an unknown format (-1), never legacy.
-    snapshotSchema: snapshot?.snapshotSchema === undefined || snapshot?.snapshotSchema === null ? undefined : typeof snapshot.snapshotSchema === "number" ? snapshot.snapshotSchema : -1,
+    // Only a property that is genuinely absent marks a legacy snapshot. Present but null/undefined/non-numeric is an unknown format (-1), never legacy.
+    snapshotSchema: schemaMarkerAbsent ? undefined : typeof snapshot?.snapshotSchema === "number" ? snapshot.snapshotSchema : -1,
     evidence: mapSnapshotEvidence(snapshot),
-    evidenceBasis: snapshot?.snapshotSchema === undefined || snapshot?.snapshotSchema === null ? "LEGACY_SNAPSHOT" : "SNAPSHOT",
+    evidenceBasis: schemaMarkerAbsent ? "LEGACY_SNAPSHOT" : "SNAPSHOT",
   };
 }
 

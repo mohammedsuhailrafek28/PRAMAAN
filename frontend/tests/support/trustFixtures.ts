@@ -74,7 +74,7 @@ export function legacyProfile(): TrustProfile {
 /** The raw backend snapshot JSON for the schema-2 profile, as /passport/me returns it. */
 export function rawSnapshot(profile: TrustProfile = schema2Profile()) {
   return {
-    profileId: profile.id, businessId: profile.businessId, snapshotSchema: profile.snapshotSchema, generatedAt: profile.generatedAt,
+    profileId: profile.id, businessId: profile.businessId, ...(profile.snapshotSchema === undefined ? {} : { snapshotSchema: profile.snapshotSchema }), generatedAt: profile.generatedAt,
     lastCalculatedAt: profile.lastCalculatedAt, version: profile.version, summary: profile.summary,
     fieldConfidence: profile.fields.map((item) => ({ ...item, evidenceIds: item.evidenceIds })),
     documentConfidence: profile.documents, ...(profile.evidence.length ? { evidence: profile.evidence } : {}),

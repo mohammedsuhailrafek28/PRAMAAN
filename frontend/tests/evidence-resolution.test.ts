@@ -109,3 +109,40 @@ test("nothing is invented for evidence that is not in the snapshot", () => {
     }
   }
 });
+
+test("an explicit null, undefined or malformed snapshotSchema is never legacy and exposes no document statuses or checks", async () => {
+  for (const marker of [null, undefined, "", "2", {}, [], [2], NaN, false]) {
+    const raw: any = rawSnapshot();
+    raw.snapshotSchema = marker; // the property is present
+    assert.ok(Object.prototype.hasOwnProperty.call(raw, "snapshotSchema"));
+    const profile = await mapped(raw);
+    const label = String(marker);
+    assert.notEqual(profile.snapshotSchema, undefined, label);
+    assert.notEqual(profile.snapshotSchema, 2, label);
+    assert.equal(profile.evidenceBasis, "SNAPSHOT", label);
+    assert.notEqual(profile.evidenceBasis, "LEGACY_SNAPSHOT", label);
+    assert.equal(profile.evidence.length, 0, label);
+    for (const claim of profile.fields) {
+      for (const line of explainClaim(profile, claim).evidence) {
+        assert.equal(line.basis, "NOT_IN_SNAPSHOT", `${claim.field} ${label}`);
+        assert.equal(line.status, null);
+        assert.deepEqual(line.checks, []);
+      }
+    }
+  }
+});
+
+test("only a genuinely absent snapshotSchema property is legacy; a missing or non-object snapshot is not", async () => {
+  const raw: any = rawSnapshot(legacyProfile());
+  assert.ok(!Object.prototype.hasOwnProperty.call(raw, "snapshotSchema") || raw.snapshotSchema === undefined);
+  delete raw.snapshotSchema;
+  const legacy = await mapped(raw);
+  assert.equal(legacy.snapshotSchema, undefined);
+  assert.equal(legacy.evidenceBasis, "LEGACY_SNAPSHOT");
+  assert.equal(explain(legacy, "gstin").evidence[0].basis, "LEGACY_SNAPSHOT");
+  for (const bad of [null, "text", 5]) {
+    const profile = await mapped(bad);
+    assert.equal(profile.evidenceBasis, "SNAPSHOT", String(bad));
+    assert.notEqual(profile.snapshotSchema, undefined, String(bad));
+  }
+});
