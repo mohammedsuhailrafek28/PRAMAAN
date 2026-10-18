@@ -85,6 +85,28 @@ enum AuditAction {
   READINESS_PROFILE_SHARED
   REPORT_GENERATED
   REPORT_REVOKED
+  REPORT_HTML_VIEWED
+  REPORT_HTML_DOWNLOADED
+  REPORT_PDF_DOWNLOADED
+  ACCESS_GRANT_CREATED
+  ACCESS_GRANT_VIEWED
+  ACCESS_GRANT_REVOKED
+  ACCESS_GRANT_EXPIRED
+  CONSENT_REJECTED
+  CONSENT_EXPIRED
+  TRUST_VIEW_OPENED
+  GUEST_LINK_CREATED
+  GUEST_LINK_OPENED
+  GUEST_LINK_REVOKED
+  GUEST_LINK_EXPIRED
+  EVIDENCE_UPLOADED
+  EVIDENCE_REPLACED
+}
+
+enum AccessGrantStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
 }
 
 model User {
@@ -100,6 +122,44 @@ model User {
   auditLogs        AuditLog[]        @relation("ActorAuditLogs")
   notifications    Notification[]
   generatedReports GeneratedReport[] @relation("ReportCreator")
+  accessGrantsCreated AccessGrant[] @relation("GrantCreator")
+  accessGrantsRequested AccessGrant[] @relation("GrantRequester")
+  requesterAssurance RequesterAssurance?
+  requesterAssuranceEvents RequesterAssuranceEvent[]
+}
+
+model RequesterAssurance {
+  id                       String   @id @default(cuid())
+  userId                   String   @unique
+  status                   String   @default("UNVERIFIED")
+  reviewedOrganizationName String?
+  reviewBasis              String?
+  reviewedAt               DateTime?
+  reviewerIdentifier       String?
+  authorizationBasis      String?
+  authorizationReference  String?
+  authorizationScope      Json?
+  authorizationExpiresAt  DateTime?
+  suspensionReason         String?
+  suspendedAt              DateTime?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  user                     User     @relation(fields: [userId], references: [id])
+  @@index([status, authorizationExpiresAt])
+}
+
+model RequesterAssuranceEvent {
+  id             String   @id @default(cuid())
+  userId         String
+  operatorId     String
+  action         String
+  previousStatus String
+  newStatus      String
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
 }
 
 model Business {
@@ -124,6 +184,7 @@ model Business {
   auditLogs          AuditLog[]
   readinessEvaluations ReadinessEvaluation[]
   generatedReports   GeneratedReport[]
+  accessGrants       AccessGrant[]
 }
 
 model Document {
@@ -139,11 +200,21 @@ model Document {
   confidenceReason String?
   crossCheckMethod String?
   source          String?
+  issuedAt        DateTime?
   checkedAt       DateTime?
   expiresAt       DateTime?
+  revision        Int            @default(1)
+  isCurrent       Boolean        @default(true)
+  previousVersionId String?
   contradictionDetails Json?
   uploadedAt   DateTime     @default(now())
   business     Business     @relation(fields: [businessId], references: [id])
+  previousVersion Document? @relation("DocumentRevisions", fields: [previousVersionId], references: [id])
+  nextVersions   Document[] @relation("DocumentRevisions")
+
+  @@index([businessId, docType, isCurrent])
+  @@index([previousVersionId])
+  @@unique([businessId, docType, revision])
 }
 
 model Passport {
@@ -153,6 +224,8 @@ model Passport {
   snapshotJson Json
   generatedAt  DateTime @default(now())
   business     Business @relation(fields: [businessId], references: [id])
+  consentApprovals ConsentRequest[] @relation("ConsentApprovedPassport")
+  accessGrants AccessGrant[] @relation("GrantPassport")
 
   @@unique([businessId, version])
 }
@@ -162,7 +235,11 @@ model ConsentRequest {
   requesterId     String
   businessId      String
   requestedFields Json
+  requestedEvidenceTypes Json @default("[]")
+  purpose         String?
   approvedFields  Json?
+  approvedEvidenceTypes Json @default("[]")
+  approvedPassportId String?
   status          ConsentStatus   @default(PENDING)
   durationDays    Int?
   approvedAt      DateTime?
@@ -171,20 +248,50 @@ model ConsentRequest {
   createdAt       DateTime        @default(now())
   requester       User            @relation("RequesterConsents", fields: [requesterId], references: [id])
   business        Business        @relation(fields: [businessId], references: [id])
+  approvedPassport Passport? @relation("ConsentApprovedPassport", fields: [approvedPassportId], references: [id])
   auditLogs       AuditLog[]
   notifications   Notification[]
+}
+
+model AccessGrant {
+  id                    String           @id @default(cuid())
+  businessId            String
+  createdByUserId       String
+  requesterId           String?
+  recipientName         String?
+  recipientOrganization String?
+  recipientEmail        String?
+  purpose               String
+  scopeJson             Json
+  passportId            String?
+  tokenHash             String           @unique
+  status                AccessGrantStatus @default(ACTIVE)
+  createdAt             DateTime         @default(now())
+  expiresAt             DateTime
+  revokedAt             DateTime?
+  lastAccessedAt        DateTime?
+  business              Business         @relation(fields: [businessId], references: [id])
+  createdBy             User             @relation("GrantCreator", fields: [createdByUserId], references: [id])
+  requester             User?            @relation("GrantRequester", fields: [requesterId], references: [id])
+  passport              Passport?        @relation("GrantPassport", fields: [passportId], references: [id])
+  auditLogs             AuditLog[]
+
+  @@index([businessId, createdAt])
+  @@index([status, expiresAt])
 }
 
 model AuditLog {
   id               String          @id @default(cuid())
   businessId       String
   consentRequestId String?
+  accessGrantId    String?
   actorId          String
   action           AuditAction
   metadata         Json?
   createdAt        DateTime        @default(now())
   business         Business        @relation(fields: [businessId], references: [id])
   consentRequest   ConsentRequest? @relation(fields: [consentRequestId], references: [id])
+  accessGrant      AccessGrant? @relation(fields: [accessGrantId], references: [id])
   actor            User            @relation("ActorAuditLogs", fields: [actorId], references: [id])
 }
 

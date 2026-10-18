@@ -75,6 +75,53 @@ const migrations = [
       ]
     },
     indexes: ["GeneratedReport_businessId_generatedAt_idx", "GeneratedReport_reportType_idx", "GeneratedReport_readinessEvaluationId_idx"]
+  },
+  {
+    name: "202607140002_report_rendering_audit_actions",
+    file: path.join(root, "prisma", "migrations", "202607140002_report_rendering_audit_actions", "migration.sql"),
+    tables: [],
+    columns: {},
+    indexes: []
+  },
+  {
+    name: "20260827120829_evidence_lifecycle",
+    file: path.join(root, "prisma", "migrations", "20260827120829_evidence_lifecycle", "migration.sql"),
+    tables: [],
+    columns: {
+      Document: ["issuedAt", "revision", "isCurrent", "previousVersionId"]
+    },
+    indexes: ["Document_businessId_docType_isCurrent_idx", "Document_previousVersionId_idx"]
+  },
+  {
+    name: "20260827130141_external_access_grants",
+    file: path.join(root, "prisma", "migrations", "20260827130141_external_access_grants", "migration.sql"),
+    tables: ["AccessGrant"],
+    columns: { AccessGrant: ["id", "businessId", "createdByUserId", "requesterId", "recipientName", "recipientOrganization", "recipientEmail", "purpose", "scopeJson", "tokenHash", "status", "createdAt", "expiresAt", "revokedAt", "lastAccessedAt"] },
+    indexes: ["AccessGrant_tokenHash_key", "AccessGrant_businessId_createdAt_idx", "AccessGrant_status_expiresAt_idx"]
+  },
+  {
+    name: "20260827135225_consent_request_purpose",
+    file: path.join(root, "prisma", "migrations", "20260827135225_consent_request_purpose", "migration.sql"),
+    tables: [],
+    columns: { ConsentRequest: ["purpose"] },
+    indexes: []
+  },
+  {
+    name: "202610010001_finals_disclosure_hardening",
+    file: path.join(root, "prisma", "migrations", "202610010001_finals_disclosure_hardening", "migration.sql"),
+    tables: [],
+    columns: { ConsentRequest: ["requestedEvidenceTypes", "approvedEvidenceTypes", "approvedPassportId"], AccessGrant: ["passportId"] },
+    indexes: ["ConsentRequest_approvedPassportId_idx", "AccessGrant_passportId_idx"]
+  },
+  {
+    name: "202610170001_identity_assurance",
+    file: path.join(root, "prisma", "migrations", "202610170001_identity_assurance", "migration.sql"),
+    tables: ["RequesterAssurance", "RequesterAssuranceEvent"],
+    columns: {
+      RequesterAssurance: ["id", "userId", "status", "reviewedOrganizationName", "reviewBasis", "reviewedAt", "reviewerIdentifier", "authorizationBasis", "authorizationReference", "authorizationScope", "authorizationExpiresAt", "suspensionReason", "suspendedAt", "createdAt", "updatedAt"],
+      RequesterAssuranceEvent: ["id", "userId", "operatorId", "action", "previousStatus", "newStatus", "metadata", "createdAt"]
+    },
+    indexes: ["RequesterAssurance_userId_key", "RequesterAssurance_status_authorizationExpiresAt_idx", "RequesterAssuranceEvent_userId_createdAt_idx"]
   }
 ] as const;
 
@@ -262,8 +309,16 @@ export function reconcilePrismaMigrations(options: { deploy?: boolean; status?: 
     const applied = appliedMigrationNames(db);
     const trustComplete = verifyMigrationShape(db, migrations[0]);
     const reportComplete = verifyMigrationShape(db, migrations[1]);
+    const evidenceComplete = verifyMigrationShape(db, migrations[3]);
+    const accessComplete = verifyMigrationShape(db, migrations[4]);
+    const purposeComplete = verifyMigrationShape(db, migrations[5]);
+    const assuranceComplete = verifyMigrationShape(db, migrations[6]);
     const trustApplied = applied.includes(migrations[0].name);
     const reportApplied = applied.includes(migrations[1].name);
+    const evidenceApplied = applied.includes(migrations[3].name);
+    const accessApplied = applied.includes(migrations[4].name);
+    const purposeApplied = applied.includes(migrations[5].name);
+    const assuranceApplied = applied.includes(migrations[6].name);
 
     report.push(`Database: ${dbPath}`);
     report.push(`Datasource: sqlite`);
@@ -283,6 +338,18 @@ export function reconcilePrismaMigrations(options: { deploy?: boolean; status?: 
     if (reportApplied && !reportComplete) {
       throw new Error(`${migrations[1].name} is recorded as applied, but its schema objects are missing or incomplete.`);
     }
+    if (evidenceApplied && !evidenceComplete) {
+      throw new Error(`${migrations[3].name} is recorded as applied, but its schema objects are missing or incomplete.`);
+    }
+    if (accessApplied && !accessComplete) {
+      throw new Error(`${migrations[4].name} is recorded as applied, but its schema objects are missing or incomplete.`);
+    }
+    if (purposeApplied && !purposeComplete) {
+      throw new Error(`${migrations[5].name} is recorded as applied, but its schema objects are missing or incomplete.`);
+    }
+    if (assuranceApplied && !assuranceComplete) {
+      throw new Error(`${migrations[6].name} is recorded as applied, but its schema objects are missing or incomplete.`);
+    }
     if (hasSourceVerifiedPromotion(db)) {
       throw new Error("Existing Document rows contain SOURCE_VERIFIED. Reconciliation will not bless unverifiable evidence state.");
     }
@@ -296,7 +363,7 @@ export function reconcilePrismaMigrations(options: { deploy?: boolean; status?: 
       return { state: "fresh", backupPath };
     }
 
-    if (trustApplied && reportApplied && trustComplete && reportComplete) {
+    if (trustApplied && reportApplied && evidenceApplied && accessApplied && purposeApplied && assuranceApplied && trustComplete && reportComplete && evidenceComplete && accessComplete && purposeComplete && assuranceComplete) {
       report.push("State: fully migrated and tracked");
       db.close();
       if (options.deploy ?? true) prismaDeploy();

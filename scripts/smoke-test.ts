@@ -1,5 +1,6 @@
 import { execFileSync, execSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 
 const root = process.cwd();
@@ -79,6 +80,22 @@ async function request(
   return { status: response.status, data };
 }
 
+async function rawRequest(
+  method: string,
+  url: string,
+  options: { token?: string; expected?: number[] } = {}
+) {
+  const headers: HeadersInit = {};
+  if (options.token) headers.Authorization = `Bearer ${options.token}`;
+  const response = await fetch(`${baseUrl}${url}`, { method, headers });
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const expected = options.expected ?? [200];
+  if (!expected.includes(response.status)) {
+    throw new Error(`${method} ${url} returned ${response.status}: ${buffer.toString("utf8")}`);
+  }
+  return { status: response.status, headers: response.headers, buffer, text: buffer.toString("utf8") };
+}
+
 async function expectBlocked(
   method: string,
   url: string,
@@ -149,15 +166,22 @@ function createFixture(name: string, content: string) {
   return filePath;
 }
 
-async function uploadDocument(token: string, docType: string, filePath: string) {
+async function uploadDocument(token: string, docType: string, filePath: string, metadata: Record<string, string> = {}) {
   const form = new FormData();
   form.set("docType", docType);
   form.set("file", new Blob([readFileSync(filePath)], { type: "application/pdf" }), path.basename(filePath));
+  for (const [key, value] of Object.entries(metadata)) form.set(key, value);
   return request("POST", "/api/business/documents", { token, form });
 }
 
 function getActions(audit: Json) {
   return audit.logs.map((logEntry: Json) => logEntry.action);
+}
+
+function containsKey(value: unknown, key: string): boolean {
+  if (Array.isArray(value)) return value.some((item) => containsKey(item, key));
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value as Record<string, unknown>).some(([entryKey, entryValue]) => entryKey === key || containsKey(entryValue, key));
 }
 
 async function main() {
@@ -220,8 +244,8 @@ async function main() {
 
     const gstFile = createFixture("gst-certificate.pdf", "%PDF-1.4 smoke GST certificate\n");
     const udyamFile = createFixture("udyam-certificate.pdf", "%PDF-1.4 smoke Udyam certificate\n");
-    const gstUpload = await uploadDocument(msmeToken, "GST_CERTIFICATE", gstFile);
-    const udyamUpload = await uploadDocument(msmeToken, "UDYAM_CERTIFICATE", udyamFile);
+    const gstUpload = await uploadDocument(msmeToken, "GST_CERTIFICATE", gstFile, { issuedAt: "2026-01-01", expiresAt: "2027-01-01", source: "MSME submitted" });
+    const udyamUpload = await uploadDocument(msmeToken, "UDYAM_CERTIFICATE", udyamFile, { issuedAt: "2026-01-01", source: "MSME submitted" });
     assert(gstUpload.data.documentId && udyamUpload.data.documentId, "document IDs missing");
     pass("D. multipart identity document uploads are recorded");
 
@@ -239,6 +263,16 @@ async function main() {
       "SOURCE_VERIFIED was produced without a source adapter"
     );
     pass("E. internal cross-check returns field confidence, document confidence, and trust metrics");
+
+    const replacementFile = createFixture("gst-certificate-v2.pdf", "%PDF-1.4 replacement GST certificate\n");
+    const replacement = await uploadDocument(msmeToken, "GST_CERTIFICATE", replacementFile, { issuedAt: "2026-02-01", expiresAt: "2027-02-01", source: "MSME replacement" });
+    const afterReplacement = await request("GET", "/api/business/me", { token: msmeToken });
+    const gstDocuments = afterReplacement.data.business.documents.filter((document: Json) => document.docType === "GST_CERTIFICATE");
+    assert(replacement.data.document.revision === 2, "replacement revision did not increment");
+    assert(gstDocuments.some((document: Json) => document.id === gstUpload.data.documentId && document.isCurrent === false), "old GST evidence was not historical");
+    assert(gstDocuments.some((document: Json) => document.id === replacement.data.documentId && document.isCurrent === true), "replacement GST evidence is not current");
+    assert(replacement.data.document.lifecycle.state === "CURRENT", "replacement lifecycle is not current");
+    pass("E2. evidence replacement increments revision and preserves historical evidence");
 
     const passportCreate = await request("POST", "/api/passport/generate", { token: msmeToken });
     assert(passportCreate.data.passportId, "passport ID missing");
@@ -258,6 +292,68 @@ async function main() {
     }
     assert(snapshot.sourceVerificationPerformed === false, "profile claims source verification");
     pass("F. Business Trust Profile generation and owner fetch return evidence-backed snapshot fields");
+
+    const snapshotVerifier = await request("POST", "/api/auth/register", {
+      body: { role: "BUYER", name: "Snapshot Verifier", organizationName: "Snapshot Verification Desk", email: "snapshot-verifier-smoke@pramaan.demo", password: "password123" }
+    });
+    const snapshotVerifierToken = snapshotVerifier.data.token;
+    run("npx", ["tsx", "scripts/requester-assurance.ts", "review", "--user-id", snapshotVerifier.data.user.id, "--operator-id", "smoke-operator-review", "--review-basis", "synthetic-smoke-review"]);
+    run("npx", ["tsx", "scripts/requester-assurance.ts", "authorize", "--user-id", snapshotVerifier.data.user.id, "--operator-id", "smoke-operator-authorize", "--authorization-basis", "synthetic-smoke-authority-review", "--authorization-reference", "synthetic-smoke-reference", "--expires-at", new Date(Date.now() + 86400000).toISOString(), "--scope-fields", "turnoverBand"]);
+    const v1Version = snapshot.version;
+    const snapshotConsent = await request("POST", "/api/consent-requests", {
+      token: snapshotVerifierToken,
+      body: { businessGstin: businessInput.gstin, requestedFields: ["legalBusinessName", "turnoverBand"], requestedEvidenceTypes: ["GST_CERTIFICATE"], purpose: "Vendor Onboarding" }
+    });
+    const snapshotConsentId = snapshotConsent.data.consentRequestId;
+    await request("PATCH", `/api/consent-requests/${snapshotConsentId}/approve`, {
+      token: msmeToken,
+      body: { approvedFields: ["legalBusinessName", "turnoverBand"], approvedEvidenceTypes: ["GST_CERTIFICATE"], durationDays: 7 }
+    });
+    const beforeV2 = await request("GET", `/api/trust-view/${snapshotConsentId}`, { token: snapshotVerifierToken });
+    assert(beforeV2.data.metadata.passportVersion === v1Version, "consent did not pin passport v1");
+    assert(beforeV2.data.sharedFields.turnoverBand.value === businessInput.turnoverBand, "v1 Trust View value mismatch");
+    const v1Evidence = beforeV2.data.evidence[0]?.uploadedAt;
+
+    await request("PATCH", "/api/business/me", { token: msmeToken, body: { ...businessInput, turnoverBand: "INR 5Cr-INR 10Cr" } });
+    const v2Gst = await uploadDocument(msmeToken, "GST_CERTIFICATE", replacementFile, { issuedAt: "2026-03-01", expiresAt: "2027-03-01", source: "MSME v2 replacement" });
+    await request("POST", "/api/passport/generate", { token: msmeToken });
+    const passportV2 = await request("GET", "/api/passport/me", { token: msmeToken });
+    assert(passportV2.data.passport.snapshotJson.version > v1Version, "passport v2 was not generated");
+    const afterV2 = await request("GET", `/api/trust-view/${snapshotConsentId}`, { token: snapshotVerifierToken });
+    assert(afterV2.data.metadata.passportVersion === v1Version, "existing consent switched to latest passport");
+    assert(afterV2.data.sharedFields.turnoverBand.value === businessInput.turnoverBand, "v2-only turnover leaked into v1 consent");
+    assert(afterV2.data.evidence[0]?.uploadedAt === v1Evidence, "v2-only evidence leaked into v1 consent");
+
+    const freshConsent = await request("POST", "/api/consent-requests", {
+      token: snapshotVerifierToken,
+      body: { businessGstin: businessInput.gstin, requestedFields: ["turnoverBand"], requestedEvidenceTypes: ["GST_CERTIFICATE"], purpose: "Vendor Onboarding" }
+    });
+    const freshConsentId = freshConsent.data.consentRequestId;
+    await request("PATCH", `/api/consent-requests/${freshConsentId}/approve`, { token: msmeToken, body: { approvedFields: ["turnoverBand"], approvedEvidenceTypes: ["GST_CERTIFICATE"], durationDays: 7 } });
+    const freshView = await request("GET", `/api/trust-view/${freshConsentId}`, { token: snapshotVerifierToken });
+    assert(freshView.data.metadata.passportVersion === passportV2.data.passport.snapshotJson.version, "new consent did not use v2");
+    assert(freshView.data.sharedFields.turnoverBand.value === "INR 5Cr-INR 10Cr", "new consent did not expose v2 value");
+    assert(freshView.data.evidence[0]?.id === undefined && freshView.data.evidence[0]?.uploadedAt !== v1Evidence, "new consent did not use v2 evidence");
+    const pinnedGuest = await request("POST", "/api/access-grants", { token: msmeToken, body: { recipientEmail: snapshotVerifier.data.user.email, purpose: "Vendor onboarding", scope: { fields: ["turnoverBand"], evidenceTypes: ["GST_CERTIFICATE"] }, durationHours: 24 } });
+    const pinnedGuestToken = (pinnedGuest.data.grant.secureUrl as string).split("/verify/")[1];
+    const pinnedGuestV2 = await request("GET", `/api/public/verify/${pinnedGuestToken}`);
+    assert(pinnedGuestV2.data.grant.profileVersion === passportV2.data.passport.snapshotJson.version, "guest profile version missing or incorrect");
+    const guestV2Evidence = pinnedGuestV2.data.evidence[0]?.uploadedAt;
+    assert(["SELF_DECLARED", "DOCUMENT_SUBMITTED", "CROSS_CHECKED", "SOURCE_VERIFIED"].includes(pinnedGuestV2.data.sharedFields.turnoverBand.evidenceStatus), `guest field status missing: ${JSON.stringify(pinnedGuestV2.data.sharedFields.turnoverBand)}`);
+    assert(pinnedGuestV2.data.evidence[0]?.lifecycle?.freshnessState, "guest evidence freshness metadata missing");
+    await uploadDocument(msmeToken, "GST_CERTIFICATE", replacementFile, { issuedAt: "2026-04-01", expiresAt: "2027-04-01", source: "MSME v3 replacement" });
+    await request("POST", "/api/passport/generate", { token: msmeToken });
+    const pinnedGuestAfterV3 = await request("GET", `/api/public/verify/${pinnedGuestToken}`);
+    assert(pinnedGuestAfterV3.data.grant.profileVersion === passportV2.data.passport.snapshotJson.version, "guest link switched to latest passport");
+    assert(pinnedGuestAfterV3.data.evidence[0]?.uploadedAt === guestV2Evidence, "guest link lost its pinned evidence after replacement");
+    const freshGuest = await request("POST", "/api/access-grants", { token: msmeToken, body: { recipientEmail: snapshotVerifier.data.user.email, purpose: "Vendor onboarding", scope: { fields: ["turnoverBand"], evidenceTypes: ["GST_CERTIFICATE"] }, durationHours: 24 } });
+    const freshGuestToken = (freshGuest.data.grant.secureUrl as string).split("/verify/")[1];
+    const freshGuestView = await request("GET", `/api/public/verify/${freshGuestToken}`);
+    assert(freshGuestView.data.grant.profileVersion > pinnedGuestV2.data.grant.profileVersion, "new guest link did not use the latest passport");
+    assert(!JSON.stringify(pinnedGuestAfterV3.data).includes("filePath"), "pinned guest response leaked file path");
+    await request("PATCH", `/api/consent-requests/${snapshotConsentId}/revoke`, { token: msmeToken });
+    await request("PATCH", `/api/consent-requests/${freshConsentId}/revoke`, { token: msmeToken });
+    pass("F2. approved consent remains pinned to passport v1 while a new consent uses passport v2 and v2 evidence");
 
     const profileList = await request("GET", "/api/readiness-profiles");
     assert(profileList.data.profiles.length === 4, "readiness profiles missing");
@@ -317,12 +413,31 @@ async function main() {
     assert(fetchedVendorReport.data.document.business.businessName === oldBusinessName, "retrieved report snapshot mismatch");
     pass("N. reports list returns metadata and retrieval returns stored snapshot");
 
+    const htmlPreview = await rawRequest("GET", `/api/reports/${vendorReportId}/preview`, { token: msmeToken });
+    assert(htmlPreview.headers.get("content-type")?.includes("text/html"), "HTML preview content type missing");
+    assert(htmlPreview.headers.get("cache-control")?.includes("no-store"), "HTML preview cache header missing");
+    assert(htmlPreview.text.includes(vendorReportId), "HTML preview missing report ID");
+    assert(htmlPreview.text.includes(oldBusinessName), "HTML preview missing business name");
+    assert(htmlPreview.text.includes("Limitations and Disclaimer"), "HTML preview missing limitations");
+    assert(!htmlPreview.text.includes("uploads/") && !htmlPreview.text.includes("uploads\\"), "HTML preview leaked local path");
+    const htmlDownload = await rawRequest("GET", `/api/reports/${vendorReportId}/html`, { token: msmeToken });
+    assert(htmlDownload.headers.get("content-disposition")?.includes(".html"), "HTML download disposition missing");
+    const pdfDownload = await rawRequest("GET", `/api/reports/${vendorReportId}/pdf`, { token: msmeToken });
+    assert(pdfDownload.headers.get("content-type")?.includes("application/pdf"), "PDF content type missing");
+    assert(pdfDownload.buffer.subarray(0, 4).toString("utf8") === "%PDF", "PDF signature missing");
+    pass("N2. report HTML preview, HTML download, and PDF download render stored snapshot");
+
     await request("PATCH", "/api/business/me", {
       token: msmeToken,
       body: { ...businessInput, legalName: "Sharma Textiles Updated" }
     });
     const oldReportAfterUpdate = await request("GET", `/api/reports/${vendorReportId}`, { token: msmeToken });
     assert(oldReportAfterUpdate.data.document.business.businessName === oldBusinessName, "old report mutated after business update");
+    const oldHtmlAfterUpdate = await rawRequest("GET", `/api/reports/${vendorReportId}/preview`, { token: msmeToken });
+    assert(oldHtmlAfterUpdate.text.includes(oldBusinessName), "old HTML did not preserve old business name");
+    assert(!oldHtmlAfterUpdate.text.includes("Sharma Textiles Updated"), "old HTML was recalculated from updated business");
+    const oldPdfAfterUpdate = await rawRequest("GET", `/api/reports/${vendorReportId}/pdf`, { token: msmeToken });
+    assert(oldPdfAfterUpdate.buffer.subarray(0, 4).toString("utf8") === "%PDF", "old PDF after update invalid");
     const newTrustReport = await request("POST", "/api/reports/generate", {
       token: msmeToken,
       body: { reportType: "BUSINESS_TRUST_PROFILE" }
@@ -343,23 +458,56 @@ async function main() {
     assert(buyerToken, "Buyer token missing");
     await expectBlocked("GET", "/api/reports", buyerToken, ["FORBIDDEN"], "buyer report list");
     await expectBlocked("GET", `/api/reports/${vendorReportId}`, buyerToken, ["FORBIDDEN"], "buyer report retrieve");
+    await expectBlocked("GET", `/api/reports/${vendorReportId}/preview`, buyerToken, ["FORBIDDEN"], "buyer report HTML preview");
+    await expectBlocked("GET", `/api/reports/${vendorReportId}/pdf`, buyerToken, ["FORBIDDEN"], "buyer report PDF download");
+    const bankRegistration = await request("POST", "/api/auth/register", {
+      body: {
+        role: "BANK",
+        name: "Karan Mehta",
+        organizationName: "Kisan NBFC",
+        email: "bank-smoke@pramaan.demo",
+        password: "password123"
+      }
+    });
+    await expectBlocked("GET", `/api/reports/${vendorReportId}/html`, bankRegistration.data.token, ["FORBIDDEN"], "bank report HTML download");
+    const otherMsme = await request("POST", "/api/auth/register", {
+      body: {
+        role: "MSME",
+        name: "Other MSME",
+        organizationName: "Other MSME Co",
+        email: "other-msme-smoke@pramaan.demo",
+        password: "password123"
+      }
+    });
+    await expectBlocked("GET", `/api/reports/${vendorReportId}/preview`, otherMsme.data.token, ["NOT_FOUND"], "other MSME report preview");
+    await expectBlocked("GET", "/api/reports/not-a-real-report/preview", msmeToken, ["NOT_FOUND"], "guessed report preview");
     pass("P. buyer auth returns JWT and cannot access report APIs");
 
     const revokeReport = await request("POST", `/api/reports/${trustReportId}/revoke`, { token: msmeToken });
     assert(revokeReport.data.report.revokedAt, "report revoke timestamp missing");
     const revokedReport = await request("GET", `/api/reports/${trustReportId}`, { token: msmeToken });
     assert(revokedReport.data.report.revokedAt, "revoked report not visible to owner");
+    const revokedHtml = await rawRequest("GET", `/api/reports/${trustReportId}/preview`, { token: msmeToken });
+    assert(revokedHtml.text.includes("REVOKED"), "revoked HTML missing revoked state");
+    const revokedPdf = await rawRequest("GET", `/api/reports/${trustReportId}/pdf`, { token: msmeToken });
+    assert(revokedPdf.buffer.subarray(0, 4).toString("utf8") === "%PDF", "revoked PDF signature missing");
     pass("Q. owner revokes report non-destructively and can still see revoked status");
 
     const consentCreate = await request("POST", "/api/consent-requests", {
       token: buyerToken,
       body: {
         businessGstin: businessInput.gstin,
-        requestedFields: ["legalBusinessName", "gstin", "udyamNumber", "summary", "limitations"]
+        requestedFields: ["legalBusinessName", "gstin", "udyamNumber", "summary"]
       }
     });
     const consentId = consentCreate.data.consentRequestId;
     assert(consentCreate.data.status === "PENDING", "consent not pending");
+    const outgoing = await request("GET", "/api/consent-requests?scope=outgoing", { token: buyerToken });
+    const outgoingRequest = outgoing.data.requests.find((item: Json) => item.id === consentId);
+    assert(outgoingRequest && outgoingRequest.business && Object.keys(outgoingRequest.business).sort().join(",") === "gstin,id,legalName", "outgoing consent leaks private business fields");
+    for (const forbidden of ["pan", "address", "turnoverBand", "documents", "user", "userId"]) assert(!containsKey(outgoingRequest, forbidden), `pending consent leaked ${forbidden}`);
+    await request("POST", "/api/consent-requests", { token: buyerToken, body: { businessGstin: businessInput.gstin, requestedFields: ["pan"] }, expected: [400] });
+    pass("R1. pending consent responses are redacted and unsafe disclosure keys are rejected");
     let msmeNotifications = await request("GET", "/api/notifications", { token: msmeToken });
     assert(
       msmeNotifications.data.notifications.some((item: Json) => item.message.includes("Acme Retail Buyers")),
@@ -396,9 +544,15 @@ async function main() {
     const expectedShared = ["legalBusinessName", "gstin", "udyamNumber", "summary"];
     assert(sharedKeys.length === expectedShared.length, `unexpected shared field count: ${sharedKeys.join(",")}`);
     for (const field of expectedShared) assert(sharedKeys.includes(field), `approved field missing: ${field}`);
-    assert(trustView.data.sharedFields.gstin.evidenceStatus, "approved field missing evidence status");
-    assert(typeof trustView.data.sharedFields.gstin.confidence === "number", "approved field missing confidence");
-    assert(trustView.data.sharedFields.gstin.confidenceReason, "approved field missing confidence reason");
+    assert(trustView.data.sharedFields.gstin.value === businessInput.gstin, "approved field value mismatch");
+    assert(trustView.data.sharedFields.gstin.evidenceStatus === "CROSS_CHECKED", "approved field status missing");
+    assert(trustView.data.sharedFields.gstin.source === "INTERNAL_DETERMINISTIC_CHECKS", "field source semantics missing");
+    assert(trustView.data.sharedFields.gstin.lastCheckedAt, "field freshness timestamp missing");
+    assert(trustView.data.sharedFields.summary.value && typeof trustView.data.sharedFields.summary.value === "object" && typeof trustView.data.sharedFields.summary.value.trustReadiness === "number", "calculated summary missing");
+    assert(trustView.data.sharedFields.summary.evidenceStatus === "CROSS_CHECKED", "summary was labelled with the wrong status");
+    assert(trustView.data.sharedFields.summary.source === "INTERNAL_DETERMINISTIC_CHECKS", "summary provenance missing");
+    assert(!["SELF_DECLARED", "DOCUMENT_SUBMITTED", "SOURCE_VERIFIED"].includes(trustView.data.sharedFields.summary.evidenceStatus), "summary provenance was mislabelled");
+    assert(trustView.data.evidence.every((item: Json) => item.lifecycle?.freshnessState), "registered evidence freshness metadata missing");
     for (const forbidden of [
       "documents",
       "rawDocuments",
@@ -416,7 +570,7 @@ async function main() {
       assert(!sharedKeys.includes(forbidden), `unapproved field leaked: ${forbidden}`);
     }
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
-    assert(getActions(audit.data).includes("TRUST_PROFILE_VIEWED"), "TRUST_PROFILE_VIEWED audit missing");
+    assert(getActions(audit.data).includes("TRUST_VIEW_OPENED"), "TRUST_VIEW_OPENED audit missing");
     pass("U. buyer dynamic trust view returns only approved fields, no report data, and records VIEWED");
 
     const otherBuyer = await request("POST", "/api/auth/register", {
@@ -466,6 +620,25 @@ async function main() {
     assert(!revokedView.data.sharedFields, "revoked response leaked sharedFields");
     pass("X. buyer trust-view after revoke is blocked with CONSENT_REVOKED");
 
+    const expiryConsentCreate = await request("POST", "/api/consent-requests", {
+      token: buyerToken,
+      body: { businessGstin: businessInput.gstin, requestedFields: ["legalBusinessName"], purpose: "Vendor Onboarding" }
+    });
+    const expiryConsentId = expiryConsentCreate.data.consentRequestId;
+    await request("PATCH", `/api/consent-requests/${expiryConsentId}/approve`, { token: msmeToken, body: { approvedFields: ["legalBusinessName"], durationDays: 1 } });
+    const expiryDb = new DatabaseSync(path.join(smokeDbDir, "smoke.db"));
+    expiryDb.prepare('UPDATE "ConsentRequest" SET "expiresAt" = ? WHERE "id" = ?').run(new Date(0).toISOString(), expiryConsentId);
+    expiryDb.close();
+    const expiredOutgoing = await request("GET", "/api/consent-requests?scope=outgoing", { token: buyerToken });
+    assert(expiredOutgoing.data.requests.find((item: Json) => item.id === expiryConsentId)?.status === "EXPIRED", "expired consent was not materialized in outgoing list");
+    const expiredIncoming = await request("GET", "/api/consent-requests?scope=incoming", { token: msmeToken });
+    assert(expiredIncoming.data.requests.find((item: Json) => item.id === expiryConsentId)?.status === "EXPIRED", "expired consent was not materialized in incoming list");
+    await expectBlocked("GET", `/api/trust-view/${expiryConsentId}`, buyerToken, ["CONSENT_EXPIRED"], "expired registered consent");
+    await expectBlocked("GET", `/api/trust-view/${expiryConsentId}`, buyerToken, ["CONSENT_EXPIRED"], "repeated expired registered consent");
+    audit = await request("GET", "/api/audit-logs", { token: msmeToken });
+    assert(getActions(audit.data).filter((action: string) => action === "CONSENT_EXPIRED").length === 1, "repeated expiry reads duplicated CONSENT_EXPIRED audit");
+    pass("X2. registered consent expiry is deterministic, denies Trust View, updates lists, and audits once");
+
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
     const actions = getActions(audit.data);
     for (const action of [
@@ -473,11 +646,14 @@ async function main() {
       "TRUST_PROFILE_GENERATED",
       "CONSENT_REQUESTED",
       "CONSENT_APPROVED",
-      "TRUST_PROFILE_VIEWED",
+      "TRUST_VIEW_OPENED",
       "CONSENT_REVOKED",
       "READINESS_PROFILE_EVALUATED",
       "REPORT_GENERATED",
-      "REPORT_REVOKED"
+      "REPORT_REVOKED",
+      "REPORT_HTML_VIEWED",
+      "REPORT_HTML_DOWNLOADED",
+      "REPORT_PDF_DOWNLOADED"
     ]) {
       assert(actions.includes(action), `audit lifecycle missing ${action}`);
     }
@@ -488,6 +664,54 @@ async function main() {
     assert(msmeNotifications.data.notifications.length > 0, "MSME notifications missing");
     assert(buyerNotifications.data.notifications.length > 0, "buyer notifications missing");
     pass("Z. notification lifecycle has expected MSME and buyer messages");
+
+    const guestGrant = await request("POST", "/api/access-grants", {
+      token: msmeToken,
+      body: {
+        recipientName: "Procurement reviewer",
+        recipientOrganization: "External Verification Desk",
+        purpose: "Vendor onboarding",
+        scope: { fields: ["legalBusinessName", "gstin", "summary"], evidenceTypes: ["GST_CERTIFICATE", "UDYAM_CERTIFICATE"] },
+        durationHours: 24
+      }
+    });
+    const guestUrl = guestGrant.data.grant.secureUrl as string;
+    const guestToken = guestUrl.split("/verify/")[1];
+    assert(guestToken && guestToken.length >= 40, "guest token is not high entropy");
+    assert(!JSON.stringify(guestGrant.data).includes("tokenHash"), "token hash leaked at creation");
+    const guestView = await request("GET", `/api/public/verify/${guestToken}`);
+    assert(guestView.data.grant.purpose === "Vendor onboarding", "guest purpose missing");
+    assert(Object.keys(guestView.data.sharedFields).sort().join(",") === "gstin,legalBusinessName,summary", "guest field scope leaked or missing");
+    assert(guestView.data.sharedFields.summary.source === "INTERNAL_DETERMINISTIC_CHECKS" && guestView.data.sharedFields.summary.evidenceStatus === "CROSS_CHECKED", "guest summary provenance missing");
+    assert(guestView.data.evidence.length === 2, "guest evidence scope missing");
+    assert(!JSON.stringify(guestView.data).includes("filePath"), "guest file path leaked");
+    const limitedGrant = await request("POST", "/api/access-grants", { token: msmeToken, body: { purpose: "Other", scope: { fields: ["gstin"] }, durationHours: 24 } });
+    const limitedToken = (limitedGrant.data.grant.secureUrl as string).split("/verify/")[1];
+    const limitedView = await request("GET", `/api/public/verify/${limitedToken}`);
+    assert(limitedView.data.business.legalName === undefined && limitedView.data.sharedFields.legalBusinessName === undefined, "unselected legal name leaked");
+    audit = await request("GET", "/api/audit-logs", { token: msmeToken });
+    assert(getActions(audit.data).includes("GUEST_LINK_CREATED") && getActions(audit.data).includes("GUEST_LINK_OPENED"), "guest audit lifecycle missing");
+    pass("AA. MSME creates secure external link and unauthenticated guest sees only allowlisted current scope");
+
+    await expectBlocked("GET", "/api/public/verify/not-a-real-token", undefined, ["INVALID_ACCESS_LINK"], "random guest token");
+    await expectBlocked("GET", "/api/public/verify/abc", undefined, ["INVALID_ACCESS_LINK"], "malformed guest token");
+    const grants = await request("GET", "/api/access-grants", { token: msmeToken });
+    assert(grants.data.grants.some((item: Json) => item.id === guestGrant.data.grant.id && item.lastAccessedAt), "active access last accessed missing");
+    const revokedGrant = await request("PATCH", `/api/access-grants/${guestGrant.data.grant.id}/revoke`, { token: msmeToken });
+    assert(revokedGrant.data.grant.status === "REVOKED", "guest grant not revoked");
+    await expectBlocked("GET", `/api/public/verify/${guestToken}`, undefined, ["ACCESS_REVOKED"], "revoked guest token");
+    await expectBlocked("PATCH", `/api/access-grants/${guestGrant.data.grant.id}/revoke`, otherMsme.data.token, ["NOT_FOUND"], "other MSME grant revoke");
+    pass("AB. external link revocation, ownership enforcement, and invalid-token behavior are server-enforced");
+
+    const expiryAt = new Date(Date.now() + 1500).toISOString();
+    const expiringGrant = await request("POST", "/api/access-grants", {
+      token: msmeToken,
+      body: { purpose: "Business verification", scope: { fields: ["legalBusinessName"] }, expiresAt: expiryAt }
+    });
+    const expiringToken = (expiringGrant.data.grant.secureUrl as string).split("/verify/")[1];
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    await expectBlocked("GET", `/api/public/verify/${expiringToken}`, undefined, ["ACCESS_EXPIRED"], "expired guest token");
+    pass("AC. guest expiry is enforced by the backend rather than a frontend timer");
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   } finally {

@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 const root = process.cwd();
 const migrationOne = "202607130001_trust_os_foundation";
 const migrationTwo = "202607140001_report_composer";
+const migrationThree = "202607140002_report_rendering_audit_actions";
 const migrationOneSql = readFileSync(path.join(root, "prisma", "migrations", migrationOne, "migration.sql"), "utf8");
 const migrationTwoSql = readFileSync(path.join(root, "prisma", "migrations", migrationTwo, "migration.sql"), "utf8");
 
@@ -194,6 +195,7 @@ function main() {
     const applied = appliedMigrations(dbPath);
     assert(applied.includes(migrationOne), "fresh database did not track Trust OS migration");
     assert(applied.includes(migrationTwo), "fresh database did not track Report Composer migration");
+    assert(applied.includes(migrationThree), "fresh database did not track Report Rendering migration");
     pass("fresh database initializes with tracked Prisma migrations");
   });
 
@@ -205,7 +207,7 @@ function main() {
     assert(tableExists(dbPath, "GeneratedReport"), "legacy database missing GeneratedReport after reconcile");
     assert(countSourceVerified(dbPath) === 0, "legacy verifiedFlag was promoted to SOURCE_VERIFIED");
     const applied = appliedMigrations(dbPath);
-    assert(applied.includes(migrationOne) && applied.includes(migrationTwo), "legacy database migrations not tracked");
+    assert(applied.includes(migrationOne) && applied.includes(migrationTwo) && applied.includes(migrationThree), "legacy database migrations not tracked");
     run(["run", "db:reconcile"], dbPath);
     pass("legacy untracked database reconciles idempotently without SOURCE_VERIFIED promotion");
   });
@@ -218,7 +220,7 @@ function main() {
     run(["run", "db:status"], dbPath);
     assert(tableExists(dbPath, "GeneratedReport"), "partial database did not apply report migration");
     const applied = appliedMigrations(dbPath);
-    assert(applied.includes(migrationOne) && applied.includes(migrationTwo), "partial database migrations not tracked");
+    assert(applied.includes(migrationOne) && applied.includes(migrationTwo) && applied.includes(migrationThree), "partial database migrations not tracked");
     pass("partial database resolves Trust OS and applies missing report migration");
   });
 
@@ -249,7 +251,7 @@ function main() {
     run(["run", "db:reconcile"], dbPath);
     run(["run", "db:status"], dbPath);
     const applied = appliedMigrations(dbPath);
-    assert(applied.includes(migrationOne) && applied.includes(migrationTwo), "schema-complete database was not resolved");
+    assert(applied.includes(migrationOne) && applied.includes(migrationTwo) && applied.includes(migrationThree), "schema-complete database was not resolved");
     pass("schema-complete untracked database resolves both migrations");
   });
 }

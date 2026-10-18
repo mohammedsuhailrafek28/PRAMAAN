@@ -1,5 +1,8 @@
 import type { AuditAction, Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
+
+/** Either the shared client or an interactive-transaction client. */
+export type AuditClient = Pick<typeof prisma, "auditLog">;
 import { ApiError } from "../../utils/apiError.js";
 
 export async function writeAuditLog(input: {
@@ -7,14 +10,34 @@ export async function writeAuditLog(input: {
   actorId: string;
   action: AuditAction;
   consentRequestId?: string | null;
+  accessGrantId?: string | null;
   metadata?: Prisma.InputJsonValue;
+  dedupeWindowMs?: number;
+  /** Pass a transaction client to make the audit row commit or roll back with the caller. */
+  client?: AuditClient;
 }) {
-  return prisma.auditLog.create({
+  const db = input.client ?? prisma;
+  if (input.dedupeWindowMs) {
+    const existing = await db.auditLog.findFirst({
+      where: {
+        businessId: input.businessId,
+        actorId: input.actorId,
+        action: input.action,
+        consentRequestId: input.consentRequestId ?? null,
+        accessGrantId: input.accessGrantId ?? null,
+        createdAt: { gte: new Date(Date.now() - input.dedupeWindowMs) }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+    if (existing) return existing;
+  }
+  return db.auditLog.create({
     data: {
       businessId: input.businessId,
       actorId: input.actorId,
       action: input.action,
       consentRequestId: input.consentRequestId,
+      accessGrantId: input.accessGrantId,
       metadata: input.metadata
     }
   });

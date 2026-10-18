@@ -10,6 +10,7 @@ import { prisma } from "./config/prisma.js";
 import { openApiSpec } from "./docs/openapi.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { requestId } from "./middleware/requestId.js";
+import { sanitizeRequestLogPath } from "./utils/requestLogPath.js";
 import authRoutes from "./modules/auth/auth.routes.js";
 import businessRoutes from "./modules/business/business.routes.js";
 import passportRoutes from "./modules/passport/passport.routes.js";
@@ -19,6 +20,7 @@ import auditRoutes from "./modules/audit/audit.routes.js";
 import notificationRoutes from "./modules/notifications/notifications.routes.js";
 import readinessRoutes from "./modules/readinessEngine/readiness.routes.js";
 import reportRoutes from "./modules/reportComposer/report.routes.js";
+import accessGrantRoutes, { guestRouter } from "./modules/accessGrant/accessGrant.routes.js";
 
 export const app = express();
 
@@ -48,7 +50,7 @@ app.use(
         return {
           id: req.id,
           method: req.method,
-          path: raw.originalUrl ?? req.url
+          path: sanitizeRequestLogPath(raw.originalUrl ?? req.url)
         };
       },
       res(res) {
@@ -61,14 +63,14 @@ app.use(
       ...value,
       requestId: req.requestId,
       method: req.method,
-      path: req.originalUrl,
+      path: sanitizeRequestLogPath(req.originalUrl),
       statusCode: res.statusCode
     }),
     customErrorObject: (req, res, error, value) => ({
       ...value,
       requestId: req.requestId,
       method: req.method,
-      path: req.originalUrl,
+      path: sanitizeRequestLogPath(req.originalUrl),
       statusCode: res.statusCode,
       errorMessage: error.message
     })
@@ -130,6 +132,8 @@ app.use("/api/readiness-profiles", readinessRoutes);
 app.use("/api", reportRoutes);
 app.use("/api/audit-logs", auditRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/access-grants", accessGrantRoutes);
+app.use("/api/public/verify", guestRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

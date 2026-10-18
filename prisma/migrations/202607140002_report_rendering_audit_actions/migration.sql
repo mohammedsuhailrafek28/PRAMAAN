@@ -1,0 +1,4 @@
+-- Report rendering audit actions.
+-- SQLite stores Prisma enum values as TEXT, so no table rewrite is required.
+-- This migration records the schema boundary for:
+-- REPORT_HTML_VIEWED, REPORT_HTML_DOWNLOADED, REPORT_PDF_DOWNLOADED.

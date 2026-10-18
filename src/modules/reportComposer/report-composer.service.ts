@@ -6,7 +6,8 @@ import { listReportTypes } from "./report-template.registry.js";
 import { loadReportData } from "./report-data-loader.js";
 import { buildExecutiveSummary, trustMetricExplanations } from "./report-summary-builder.js";
 import { buildTimeline } from "./report-timeline-builder.js";
-import type { ReportDocument } from "./report-composer.types.js";
+import { validateReportDocument, type ReportDocument } from "./report-composer.types.js";
+import { newCuid } from "../../utils/id.js";
 
 export { listReportTypes };
 
@@ -14,41 +15,95 @@ export async function generateReport(user: Express.User, reportTypeRaw: string) 
   const reportType = parseReportType(reportTypeRaw);
   const data = await loadReportData(user, reportType);
   const generatedAt = new Date();
-  const placeholder = await prisma.generatedReport.create({
-    data: {
-      businessId: data.business.id,
-      reportType,
-      reportVersion: data.template.reportVersion,
-      trustProfileId: data.passport.id,
-      readinessEvaluationId: data.readinessEvaluationId,
-      snapshotJson: {},
-      generatedAt,
-      expiresAt: null,
-      createdByUserId: user.id
-    }
-  });
-
+  const reportId = newCuid();
   const snapshot = composeReportDocument({
-    reportId: placeholder.id,
+    reportId,
     generatedAt,
     revokedAt: null,
     expiresAt: null,
     ...data
   });
+  const pinnedEvidenceIds = Array.isArray(data.trustProfile.evidence)
+    ? data.trustProfile.evidence.map((item: any) => item?.documentId).filter((id: unknown): id is string => typeof id === "string")
+    : Array.isArray(data.trustProfile.documentConfidence)
+      ? data.trustProfile.documentConfidence.map((item: any) => item?.documentId).filter((id: unknown): id is string => typeof id === "string")
+      : [];
+  validateReportDocument(snapshot, { reportId, businessId: data.business.id, passportId: data.passport.id, pinnedEvidenceIds });
 
-  const report = await prisma.generatedReport.update({
-    where: { id: placeholder.id },
-    data: { snapshotJson: snapshot as Prisma.InputJsonValue }
+  const report = await prisma.$transaction(async (tx) => persistReportAtomically(tx, {
+    reportId,
+    businessId: data.business.id,
+    reportType,
+    reportVersion: data.template.reportVersion,
+    trustProfileId: data.passport.id,
+    readinessEvaluationId: data.readinessEvaluationId,
+    pinnedEvidenceIds,
+    snapshot,
+    generatedAt,
+    createdByUserId: user.id
+  }), { maxWait: 15000, timeout: 30000 });
+
+  return { report: metadataFor(report), document: snapshot };
+}
+
+type ReportPersistenceClient = Pick<typeof prisma, "generatedReport" | "auditLog">;
+
+type ReportPersistenceInput = {
+  reportId: string;
+  businessId: string;
+  reportType: ReportType;
+  reportVersion: string;
+  trustProfileId: string;
+  readinessEvaluationId: string | null;
+  pinnedEvidenceIds: readonly string[];
+  snapshot: ReportDocument;
+  generatedAt: Date;
+  createdByUserId: string;
+};
+
+/** Create the complete report and its audit record inside the caller's transaction. */
+export async function persistReportAtomically(client: ReportPersistenceClient, input: ReportPersistenceInput) {
+  const pinnedEvidenceIds = requirePinnedEvidenceIds(input.pinnedEvidenceIds);
+  validateReportDocument(input.snapshot, {
+    reportId: input.reportId,
+    businessId: input.businessId,
+    passportId: input.trustProfileId,
+    pinnedEvidenceIds
+  });
+  const report = await client.generatedReport.create({
+    data: {
+      id: input.reportId,
+      businessId: input.businessId,
+      reportType: input.reportType,
+      reportVersion: input.reportVersion,
+      trustProfileId: input.trustProfileId,
+      readinessEvaluationId: input.readinessEvaluationId,
+      snapshotJson: input.snapshot as Prisma.InputJsonValue,
+      generatedAt: input.generatedAt,
+      expiresAt: null,
+      createdByUserId: input.createdByUserId
+    }
   });
 
   await writeAuditLog({
-    businessId: data.business.id,
-    actorId: user.id,
+    client,
+    businessId: input.businessId,
+    actorId: input.createdByUserId,
     action: AuditAction.REPORT_GENERATED,
-    metadata: auditMetadata(snapshot) as Prisma.InputJsonValue
+    metadata: auditMetadata(input.snapshot) as Prisma.InputJsonValue
   });
 
-  return { report: metadataFor(report), document: snapshot };
+  return report;
+}
+
+function requirePinnedEvidenceIds(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) {
+    throw new Error("pinnedEvidenceIds must be an array supplied by the report generator.");
+  }
+  if (value.some((id) => typeof id !== "string" || id.length === 0)) {
+    throw new Error("pinnedEvidenceIds must contain only non-empty evidence IDs.");
+  }
+  return value;
 }
 
 export async function listReports(user: Express.User, filters: { reportType?: string; revoked?: string }) {
@@ -101,7 +156,7 @@ async function requireOwnedReport(user: Express.User, reportId: string) {
   return report;
 }
 
-function composeReportDocument(input: Awaited<ReturnType<typeof loadReportData>> & {
+export function composeReportDocument(input: Awaited<ReturnType<typeof loadReportData>> & {
   reportId: string;
   generatedAt: Date;
   expiresAt: Date | null;
@@ -111,8 +166,15 @@ function composeReportDocument(input: Awaited<ReturnType<typeof loadReportData>>
   const readiness = input.readiness;
   const fields = (trustProfile.fieldConfidence ?? []) as Array<Record<string, any>>;
   const docs = (trustProfile.documentConfidence ?? []) as Array<Record<string, any>>;
-  const docMeta = new Map(input.business.documents.map((doc) => [doc.id, doc]));
+  const pinnedEvidence = Array.isArray(trustProfile.evidence) ? trustProfile.evidence as Array<Record<string, any>> : [];
+  const evidenceById = new Map(pinnedEvidence.map((record) => [record.documentId, record]));
+  const pinnedEvidenceIds = new Set(
+    pinnedEvidence.length
+      ? pinnedEvidence.map((record) => record.documentId)
+      : docs.map((record) => record.documentId)
+  );
   const field = (name: string) => fields.find((item) => item.field === name);
+  const valueFor = (name: string) => field(name)?.value ?? null;
   const summary = buildExecutiveSummary({
     reportType: input.template.reportType,
     trustProfile: trustProfile as any,
@@ -128,15 +190,15 @@ function composeReportDocument(input: Awaited<ReturnType<typeof loadReportData>>
     revokedAt: input.revokedAt?.toISOString() ?? null,
     business: {
       businessId: input.business.id,
-      businessName: input.business.legalName,
-      ownerName: input.business.user.name,
+      businessName: valueFor("legalBusinessName"),
+      ownerName: valueFor("ownerName"),
       businessType: null,
       identifiers: {
-        gstin: input.business.gstin,
-        pan: field("pan")?.value ?? null,
-        udyamNumber: input.business.udyamNumber
+        gstin: valueFor("gstin"),
+        pan: valueFor("pan"),
+        udyamNumber: valueFor("udyamNumber")
       },
-      address: input.business.address
+      address: valueFor("address")
     },
     headline: {
       statusLabel: readiness ? readiness.result.level : "EVIDENCE_BACKED_BUSINESS_TRUST_PROFILE",
@@ -153,22 +215,22 @@ function composeReportDocument(input: Awaited<ReturnType<typeof loadReportData>>
       evidenceStatus: item.status,
       confidence: item.confidence,
       reason: item.reason,
-      evidenceIds: item.evidenceIds ?? [],
+      evidenceIds: Array.isArray(item.evidenceIds) ? item.evidenceIds.filter((id: unknown) => typeof id === "string" && pinnedEvidenceIds.has(id)) : [],
       checks: item.checks ?? []
     })),
     requirements: readiness?.requirements ?? [],
     evidence: docs.map((doc) => ({
       documentId: doc.documentId,
-      documentType: doc.documentType,
-      fileName: docMeta.get(doc.documentId)?.originalName ?? null,
-      submittedAt: docMeta.get(doc.documentId)?.uploadedAt?.toISOString() ?? null,
+      documentType: evidenceById.get(doc.documentId)?.docType ?? doc.documentType,
+      fileName: null,
+      submittedAt: evidenceById.get(doc.documentId)?.uploadedAt ?? null,
       evidenceStatus: doc.status,
       confidence: doc.confidence,
       reason: doc.reason,
-      crossCheckMethod: docMeta.get(doc.documentId)?.crossCheckMethod ?? "INTERNAL_METADATA_CHECK",
-      checkedAt: docMeta.get(doc.documentId)?.checkedAt?.toISOString() ?? null,
-      expiresAt: docMeta.get(doc.documentId)?.expiresAt?.toISOString() ?? null,
-      checks: doc.checks ?? [],
+      crossCheckMethod: evidenceById.get(doc.documentId)?.crossCheckMethod ?? null,
+      checkedAt: evidenceById.get(doc.documentId)?.checkedAt ?? null,
+      expiresAt: evidenceById.get(doc.documentId)?.expiresAt ?? null,
+      checks: evidenceById.get(doc.documentId)?.checks ?? doc.checks ?? [],
       limitations: ["Document contents were not parsed.", "No authoritative source verification was performed."]
     })),
     contradictions: (trustProfile.contradictions ?? []).map((item: any) => ({

@@ -10,12 +10,21 @@ export async function getMine(req: Request, res: Response) {
   res.json({ business: await businessService.getMine(req.user!.id) });
 }
 
+export async function lookup(req: Request, res: Response) {
+  const gstin = Array.isArray(req.params.gstin) ? req.params.gstin[0] : req.params.gstin;
+  res.json({ business: await businessService.lookupByGstin(gstin) });
+}
+
 export async function patchMine(req: Request, res: Response) {
   res.json({ business: await businessService.upsertProfile(req.user!.id, req.body) });
 }
 
 export async function uploadDocument(req: Request, res: Response) {
-  const document = await businessService.uploadDocument(req.user!.id, req.body.docType, req.file);
+  const document = await businessService.uploadDocument(req.user!.id, req.body.docType, req.file, {
+    issuedAt: req.body.issuedAt,
+    expiresAt: req.body.expiresAt,
+    source: req.body.source
+  });
   res.status(201).json({
     documentId: document.id,
     evidenceStatus: document.evidenceStatus,
