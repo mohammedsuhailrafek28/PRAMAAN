@@ -2,7 +2,7 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
-import { ReportType, UserRole, type Prisma } from "@prisma/client";
+import { PrismaClient, ReportType, UserRole, type Prisma } from "@prisma/client";
 import type { ReportDocument } from "../src/modules/reportComposer/report-composer.types.js";
 
 const root = process.cwd();
@@ -20,7 +20,9 @@ execSync("npm run db:init", { cwd: root, stdio: "ignore", env: process.env });
 async function main() {
 const { prisma } = await import("../src/config/prisma.js");
 const { newCuid } = await import("../src/utils/id.js");
-const { persistReportAtomically, generateReport } = await import("../src/modules/reportComposer/report-composer.service.js");
+const { persistReportAtomically, generateReport, composeReportDocument } = await import("../src/modules/reportComposer/report-composer.service.js");
+const { generate: generateTrustProfile } = await import("../src/modules/passport/passport.service.js");
+const { getReportTemplate } = await import("../src/modules/reportComposer/report-template.registry.js");
 const { validateReportDocument } = await import("../src/modules/reportComposer/report-composer.types.js");
 
 let failures = 0;
@@ -44,7 +46,7 @@ async function rejects(run: Promise<unknown>) {
   }
   throw new Error("expected operation to fail");
 }
-function document(reportId: string, businessId: string): ReportDocument {
+function document(reportId: string, businessId: string, passportId = "passport-test"): ReportDocument {
   return {
     reportId,
     reportType: ReportType.BUSINESS_TRUST_PROFILE,
@@ -52,19 +54,40 @@ function document(reportId: string, businessId: string): ReportDocument {
     generatedAt: new Date().toISOString(),
     expiresAt: null,
     revokedAt: null,
-    business: { businessId, businessName: "Synthetic Textiles" },
+    business: { businessId, businessName: "Synthetic Textiles", ownerName: "Synthetic Owner", address: null, identifiers: { gstin: null, pan: null, udyamNumber: null } },
     headline: { statusLabel: "EVIDENCE_BACKED_BUSINESS_TRUST_PROFILE", score: 80, level: null, summary: "Synthetic report." },
     trustMetrics: [],
     identityFields: [],
     requirements: [],
-    evidence: [],
+    evidence: [{
+      documentId: "doc-1",
+      documentType: "GST_CERTIFICATE",
+      fileName: null,
+      submittedAt: "2026-10-18T00:00:00.000Z",
+      evidenceStatus: "CROSS_CHECKED",
+      confidence: 80,
+      reason: "Synthetic check.",
+      crossCheckMethod: "INTERNAL_METADATA_CHECK",
+      checkedAt: "2026-10-18T00:00:00.000Z",
+      expiresAt: null,
+      checks: [],
+      limitations: []
+    }],
     contradictions: [],
     gaps: [],
     actions: [],
     timeline: [],
     limitations: [],
     disclaimer: "Synthetic test report.",
-    provenance: { businessId, trustProfileId: "passport-test", readinessEvaluationId: null }
+    provenance: {
+      businessId,
+      trustProfileId: passportId,
+      trustProfileGeneratedAt: "2026-10-18T00:00:00.000Z",
+      readinessEvaluationId: null,
+      readinessProfileId: null,
+      readinessProfileVersion: null,
+      sourceVerificationPerformed: false
+    }
   };
 }
 
@@ -76,7 +99,7 @@ const passport = await prisma.passport.create({ data: { id: newCuid(), businessI
 
 async function persist(input: Partial<Parameters<typeof persistReportAtomically>[1]> = {}) {
   const reportId = input.reportId ?? newCuid();
-  const snapshot = input.snapshot ?? document(reportId, business.id);
+  const snapshot = input.snapshot ?? document(reportId, business.id, passport.id);
   return prisma.$transaction((tx) => persistReportAtomically(tx, {
     reportId,
     businessId: business.id,
@@ -97,6 +120,41 @@ await test("complete snapshot is validated before persistence", async () => {
   assert(await prisma.generatedReport.count({ where: { id: reportId } }) === 0, "invalid snapshot created a row");
 });
 
+await test("sixteen malformed nested report shapes are rejected", async () => {
+  const reportId = newCuid();
+  const base = () => document(reportId, business.id, passport.id);
+  const cases: Array<[string, (snapshot: any) => void]> = [
+    ["missing report type", (s) => delete s.reportType],
+    ["invalid generated timestamp", (s) => { s.generatedAt = "never"; }],
+    ["business is scalar", (s) => { s.business = "wrong"; }],
+    ["business identity mismatch", (s) => { s.business.businessId = "other-business"; }],
+    ["provenance identity mismatch", (s) => { s.provenance.businessId = "other-business"; }],
+    ["NaN headline score", (s) => { s.headline.score = Number.NaN; }],
+    ["infinite metric score", (s) => { s.trustMetrics = [{ score: Number.POSITIVE_INFINITY }]; }],
+    ["identity field is scalar", (s) => { s.identityFields = ["wrong"]; }],
+    ["identity evidence escapes snapshot", (s) => { s.identityFields = [{ field: "gstin", label: "Gstin", evidenceStatus: "CROSS_CHECKED", confidence: 80, reason: "x", evidenceIds: ["ghost"], checks: [] }]; }],
+    ["evidence is scalar", (s) => { s.evidence = "wrong"; }],
+    ["evidence has no document id", (s) => { delete s.evidence[0].documentId; }],
+    ["evidence has invalid document type", (s) => { s.evidence[0].documentType = "PAN_CARD"; }],
+    ["evidence has invalid status", (s) => { s.evidence[0].evidenceStatus = "VERIFIED_BY_MAGIC"; }],
+    ["evidence has non-finite confidence", (s) => { s.evidence[0].confidence = Number.POSITIVE_INFINITY; }],
+    ["duplicate evidence reference", (s) => { s.evidence.push({ ...s.evidence[0] }); }],
+    ["evidence limitation is non-string", (s) => { s.evidence[0].limitations = [7]; }]
+  ];
+  assert(cases.length === 16, "negative validator case count changed");
+  for (const [name, mutate] of cases) {
+    const snapshot = base();
+    mutate(snapshot);
+    await rejects(Promise.resolve().then(() => validateReportDocument(snapshot, {
+      reportId,
+      businessId: business.id,
+      passportId: passport.id,
+      pinnedEvidenceIds: ["doc-1"]
+    })));
+    assert(name.length > 0, "case name missing");
+  }
+});
+
 await test("report and audit commit together", async () => {
   const report = await persist();
   const audit = (await prisma.auditLog.findMany({ where: { action: "REPORT_GENERATED" } })).find((item) => JSON.stringify(item.metadata).includes(report.id));
@@ -111,6 +169,15 @@ await test("audit failure rolls back the report row", async () => {
   assert(!(await prisma.auditLog.findMany({ where: { action: "REPORT_GENERATED" } })).some((item) => JSON.stringify(item.metadata).includes(reportId)), "orphaned audit survived audit failure");
 });
 
+await test("post-report-insert audit trigger rolls back both rows", async () => {
+  const reportId = newCuid();
+  await prisma.$executeRawUnsafe(`CREATE TRIGGER fail_report_audit AFTER INSERT ON "GeneratedReport" BEGIN SELECT RAISE(ABORT, 'synthetic audit failure'); END;`);
+  await rejects(persist({ reportId }));
+  await prisma.$executeRawUnsafe(`DROP TRIGGER fail_report_audit`);
+  assert(await prisma.generatedReport.count({ where: { id: reportId } }) === 0, "report survived post-insert audit failure");
+  assert(!(await prisma.auditLog.findMany({ where: { action: "REPORT_GENERATED" } })).some((item) => JSON.stringify(item.metadata).includes(reportId)), "audit survived post-insert failure");
+});
+
 await test("database insert failure leaves no new audit row", async () => {
   const reportId = newCuid();
   await persist({ reportId });
@@ -121,6 +188,7 @@ await test("database insert failure leaves no new audit row", async () => {
 
 await test("uncommitted report is invisible to concurrent readers", async () => {
   const reportId = newCuid();
+  const reader = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_URL } } });
   await prisma.$transaction(async (tx) => {
     await persistReportAtomically(tx, {
       reportId,
@@ -129,12 +197,51 @@ await test("uncommitted report is invisible to concurrent readers", async () => 
       reportVersion: "1.0",
       trustProfileId: passport.id,
       readinessEvaluationId: null,
-      snapshot: document(reportId, business.id),
+      snapshot: document(reportId, business.id, passport.id),
       generatedAt: new Date(),
       createdByUserId: user.id
     });
-    assert(await prisma.generatedReport.findUnique({ where: { id: reportId } }) === null, "concurrent reader observed uncommitted report");
+    assert(await reader.generatedReport.findUnique({ where: { id: reportId } }) === null, "independent reader observed uncommitted report");
   }, { maxWait: 15000, timeout: 30000 });
+  assert(await reader.generatedReport.findUnique({ where: { id: reportId } }), "committed report missing after transaction");
+  await reader.$disconnect();
+});
+
+await test("stale live document metadata cannot override the newer Passport snapshot", async () => {
+  const initial = await prisma.document.create({
+    data: {
+      id: newCuid(),
+      businessId: business.id,
+      docType: "GST_CERTIFICATE",
+      filePath: "synthetic-old.pdf",
+      originalName: "old-revision.pdf",
+      mimeType: "application/pdf",
+      revision: 1,
+      isCurrent: true,
+      uploadedAt: new Date("2026-10-17T00:00:00.000Z")
+    }
+  });
+  const initialBusiness = await prisma.business.findUnique({ where: { id: business.id }, include: { documents: true } });
+  await prisma.document.update({ where: { id: initial.id }, data: { originalName: "new-revision.pdf", uploadedAt: new Date("2026-10-18T00:00:00.000Z") } });
+  const generated = await generateTrustProfile(user.id);
+  const trustProfile = generated.snapshotJson as any;
+  const report = composeReportDocument({
+    reportId: newCuid(),
+    generatedAt: new Date(),
+    revokedAt: null,
+    expiresAt: null,
+    business: initialBusiness,
+    template: getReportTemplate(ReportType.BUSINESS_TRUST_PROFILE),
+    passport: generated,
+    trustProfile,
+    readiness: null,
+    readinessEvaluationId: null,
+    auditLogs: []
+  } as never);
+  const evidence = report.evidence.find((item) => item.documentId === initial.id);
+  assert(evidence, "generated Passport did not contain the synthetic evidence");
+  assert(evidence.fileName === null, "report read live filename metadata");
+  assert(evidence.submittedAt === trustProfile.evidence.find((item: any) => item.documentId === initial.id)?.uploadedAt, "report evidence date did not come from Passport snapshot");
 });
 
 await test("concurrent API report generations leave only complete reports", async () => {

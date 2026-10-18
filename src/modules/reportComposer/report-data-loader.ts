@@ -9,14 +9,16 @@ import { getReportTemplate } from "./report-template.registry.js";
 export async function loadReportData(user: Express.User, reportType: ReportType) {
   if (user.role !== UserRole.MSME) throw new ApiError(403, "FORBIDDEN", "Only MSMEs can generate reports.");
   const business = await prisma.business.findUnique({
-    where: { userId: user.id },
-    include: { user: true, documents: true }
+    where: { userId: user.id }
   });
   if (!business) throw new ApiError(404, "NOT_FOUND", "Business profile not found.");
 
   const template = getReportTemplate(reportType);
   const passport = await generateTrustProfile(user.id);
   const trustProfile = passport.snapshotJson as Record<string, any>;
+  if (trustProfile.businessId !== business.id) {
+    throw new ApiError(500, "INVALID_TRUST_PROFILE_SNAPSHOT", "Trust Profile snapshot does not belong to the business.");
+  }
 
   let readiness: ReadinessEvaluationResponse | null = null;
   let readinessEvaluationId: string | null = null;

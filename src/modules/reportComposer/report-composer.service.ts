@@ -23,7 +23,12 @@ export async function generateReport(user: Express.User, reportTypeRaw: string) 
     expiresAt: null,
     ...data
   });
-  validateReportDocument(snapshot, { reportId, businessId: data.business.id });
+  const pinnedEvidenceIds = Array.isArray(data.trustProfile.evidence)
+    ? data.trustProfile.evidence.map((item: any) => item?.documentId).filter((id: unknown): id is string => typeof id === "string")
+    : Array.isArray(data.trustProfile.documentConfidence)
+      ? data.trustProfile.documentConfidence.map((item: any) => item?.documentId).filter((id: unknown): id is string => typeof id === "string")
+      : [];
+  validateReportDocument(snapshot, { reportId, businessId: data.business.id, passportId: data.passport.id, pinnedEvidenceIds });
 
   const report = await prisma.$transaction(async (tx) => persistReportAtomically(tx, {
     reportId,
@@ -56,6 +61,12 @@ type ReportPersistenceInput = {
 
 /** Create the complete report and its audit record inside the caller's transaction. */
 export async function persistReportAtomically(client: ReportPersistenceClient, input: ReportPersistenceInput) {
+  validateReportDocument(input.snapshot, {
+    reportId: input.reportId,
+    businessId: input.businessId,
+    passportId: input.trustProfileId,
+    pinnedEvidenceIds: input.snapshot.evidence.map((item) => item.documentId).filter((id): id is string => typeof id === "string")
+  });
   const report = await client.generatedReport.create({
     data: {
       id: input.reportId,
@@ -132,7 +143,7 @@ async function requireOwnedReport(user: Express.User, reportId: string) {
   return report;
 }
 
-function composeReportDocument(input: Awaited<ReturnType<typeof loadReportData>> & {
+export function composeReportDocument(input: Awaited<ReturnType<typeof loadReportData>> & {
   reportId: string;
   generatedAt: Date;
   expiresAt: Date | null;
@@ -142,8 +153,15 @@ function composeReportDocument(input: Awaited<ReturnType<typeof loadReportData>>
   const readiness = input.readiness;
   const fields = (trustProfile.fieldConfidence ?? []) as Array<Record<string, any>>;
   const docs = (trustProfile.documentConfidence ?? []) as Array<Record<string, any>>;
-  const docMeta = new Map(input.business.documents.map((doc) => [doc.id, doc]));
+  const pinnedEvidence = Array.isArray(trustProfile.evidence) ? trustProfile.evidence as Array<Record<string, any>> : [];
+  const evidenceById = new Map(pinnedEvidence.map((record) => [record.documentId, record]));
+  const pinnedEvidenceIds = new Set(
+    pinnedEvidence.length
+      ? pinnedEvidence.map((record) => record.documentId)
+      : docs.map((record) => record.documentId)
+  );
   const field = (name: string) => fields.find((item) => item.field === name);
+  const valueFor = (name: string) => field(name)?.value ?? null;
   const summary = buildExecutiveSummary({
     reportType: input.template.reportType,
     trustProfile: trustProfile as any,
@@ -159,15 +177,15 @@ function composeReportDocument(input: Awaited<ReturnType<typeof loadReportData>>
     revokedAt: input.revokedAt?.toISOString() ?? null,
     business: {
       businessId: input.business.id,
-      businessName: input.business.legalName,
-      ownerName: input.business.user.name,
+      businessName: valueFor("legalBusinessName"),
+      ownerName: valueFor("ownerName"),
       businessType: null,
       identifiers: {
-        gstin: input.business.gstin,
-        pan: field("pan")?.value ?? null,
-        udyamNumber: input.business.udyamNumber
+        gstin: valueFor("gstin"),
+        pan: valueFor("pan"),
+        udyamNumber: valueFor("udyamNumber")
       },
-      address: input.business.address
+      address: valueFor("address")
     },
     headline: {
       statusLabel: readiness ? readiness.result.level : "EVIDENCE_BACKED_BUSINESS_TRUST_PROFILE",
@@ -184,22 +202,22 @@ function composeReportDocument(input: Awaited<ReturnType<typeof loadReportData>>
       evidenceStatus: item.status,
       confidence: item.confidence,
       reason: item.reason,
-      evidenceIds: item.evidenceIds ?? [],
+      evidenceIds: Array.isArray(item.evidenceIds) ? item.evidenceIds.filter((id: unknown) => typeof id === "string" && pinnedEvidenceIds.has(id)) : [],
       checks: item.checks ?? []
     })),
     requirements: readiness?.requirements ?? [],
     evidence: docs.map((doc) => ({
       documentId: doc.documentId,
-      documentType: doc.documentType,
-      fileName: docMeta.get(doc.documentId)?.originalName ?? null,
-      submittedAt: docMeta.get(doc.documentId)?.uploadedAt?.toISOString() ?? null,
+      documentType: evidenceById.get(doc.documentId)?.docType ?? doc.documentType,
+      fileName: null,
+      submittedAt: evidenceById.get(doc.documentId)?.uploadedAt ?? null,
       evidenceStatus: doc.status,
       confidence: doc.confidence,
       reason: doc.reason,
-      crossCheckMethod: docMeta.get(doc.documentId)?.crossCheckMethod ?? "INTERNAL_METADATA_CHECK",
-      checkedAt: docMeta.get(doc.documentId)?.checkedAt?.toISOString() ?? null,
-      expiresAt: docMeta.get(doc.documentId)?.expiresAt?.toISOString() ?? null,
-      checks: doc.checks ?? [],
+      crossCheckMethod: evidenceById.get(doc.documentId)?.crossCheckMethod ?? null,
+      checkedAt: evidenceById.get(doc.documentId)?.checkedAt ?? null,
+      expiresAt: evidenceById.get(doc.documentId)?.expiresAt ?? null,
+      checks: evidenceById.get(doc.documentId)?.checks ?? doc.checks ?? [],
       limitations: ["Document contents were not parsed.", "No authoritative source verification was performed."]
     })),
     contradictions: (trustProfile.contradictions ?? []).map((item: any) => ({
