@@ -21,8 +21,11 @@ async function main() {
 const { prisma } = await import("../src/config/prisma.js");
 const { newCuid } = await import("../src/utils/id.js");
 const { persistReportAtomically, generateReport, composeReportDocument } = await import("../src/modules/reportComposer/report-composer.service.js");
+const { loadReportDataFromPassport } = await import("../src/modules/reportComposer/report-data-loader.js");
 const { generate: generateTrustProfile } = await import("../src/modules/passport/passport.service.js");
-const { getReportTemplate } = await import("../src/modules/reportComposer/report-template.registry.js");
+const { getReportTemplate, listReportTypes } = await import("../src/modules/reportComposer/report-template.registry.js");
+const { evaluateReadinessFromTrustProfile } = await import("../src/modules/readinessEngine/readiness-engine.service.js");
+const { getReadinessProfile } = await import("../src/modules/readinessEngine/readiness-profile.registry.js");
 const { validateReportDocument } = await import("../src/modules/reportComposer/report-composer.types.js");
 
 let failures = 0;
@@ -107,6 +110,7 @@ async function persist(input: Partial<Parameters<typeof persistReportAtomically>
     reportVersion: "1.0",
     trustProfileId: passport.id,
     readinessEvaluationId: null,
+      pinnedEvidenceIds: ["doc-1"],
     snapshot,
     generatedAt: new Date(),
     createdByUserId: input.createdByUserId ?? user.id
@@ -197,6 +201,7 @@ await test("uncommitted report is invisible to concurrent readers", async () => 
       reportVersion: "1.0",
       trustProfileId: passport.id,
       readinessEvaluationId: null,
+      pinnedEvidenceIds: ["doc-1"],
       snapshot: document(reportId, business.id, passport.id),
       generatedAt: new Date(),
       createdByUserId: user.id
@@ -242,6 +247,69 @@ await test("stale live document metadata cannot override the newer Passport snap
   assert(evidence, "generated Passport did not contain the synthetic evidence");
   assert(evidence.fileName === null, "report read live filename metadata");
   assert(evidence.submittedAt === trustProfile.evidence.find((item: any) => item.documentId === initial.id)?.uploadedAt, "report evidence date did not come from Passport snapshot");
+});
+
+await test("readiness reports stay pinned to Passport generation across document replacement", async () => {
+  const pinnedUser = await prisma.user.create({
+    data: { id: newCuid(), role: UserRole.MSME, name: "Pinned Owner", organizationName: "Pinned Textiles", email: `pinned-${runId}@example.test`, passwordHash: "not-a-login" }
+  });
+  const pinnedBusiness = await prisma.business.create({
+    data: { id: newCuid(), userId: pinnedUser.id, legalName: "Pinned Textiles", gstin: `33PINNED${String(Date.now()).slice(-6)}F1Z5` }
+  });
+  const revisionOne = await prisma.document.create({
+    data: {
+      id: newCuid(), businessId: pinnedBusiness.id, docType: "GST_CERTIFICATE", filePath: "pinned-v1.pdf", originalName: "gst-v1.pdf", mimeType: "application/pdf",
+      revision: 1, isCurrent: true, uploadedAt: new Date("2026-10-01T00:00:00.000Z"), expiresAt: new Date("2027-10-01T00:00:00.000Z")
+    }
+  });
+  const passportV1 = await generateTrustProfile(pinnedUser.id);
+  const snapshotV1 = passportV1.snapshotJson as any;
+  assert(snapshotV1.version === 1, "expected Passport v1");
+  assert(snapshotV1.evidence.some((item: any) => item.documentId === revisionOne.id && item.revision === 1), "Passport v1 did not pin revision 1");
+
+  await prisma.document.update({ where: { id: revisionOne.id }, data: { isCurrent: false } });
+  const revisionTwo = await prisma.document.create({
+    data: {
+      id: newCuid(), businessId: pinnedBusiness.id, docType: "GST_CERTIFICATE", filePath: "pinned-v2.pdf", originalName: "gst-v2-expired.pdf", mimeType: "application/pdf",
+      revision: 2, isCurrent: true, previousVersionId: revisionOne.id, uploadedAt: new Date("2026-10-18T00:00:00.000Z"), expiresAt: new Date("2026-10-17T00:00:00.000Z")
+    }
+  });
+  assert(revisionTwo.id !== revisionOne.id, "revision replacement did not create a new document");
+
+  const reportUser = { id: pinnedUser.id, role: UserRole.MSME, email: pinnedUser.email };
+  const vendorTemplate = getReportTemplate(ReportType.VENDOR_ONBOARDING_READINESS);
+  const pinnedData = await loadReportDataFromPassport(reportUser, pinnedBusiness, vendorTemplate, passportV1);
+  const pinnedReport = composeReportDocument({
+    reportId: newCuid(), generatedAt: new Date(), revokedAt: null, expiresAt: null, ...pinnedData
+  } as never);
+  const reportEvidence = pinnedReport.evidence.find((item) => item.documentId === revisionOne.id);
+  assert(reportEvidence, "report did not retain Passport v1 evidence");
+  assert(!pinnedReport.evidence.some((item) => item.documentId === revisionTwo.id), "report read the replacement document");
+  assert(pinnedReport.provenance.trustProfileGeneratedAt === passportV1.generatedAt.toISOString(), "report provenance changed Passport generation");
+  assert(pinnedData.readiness?.trustProfileGeneratedAt === snapshotV1.generatedAt, "readiness did not use Passport v1 timestamp");
+  const expectedPinnedReadiness = evaluateReadinessFromTrustProfile({
+    definition: getReadinessProfile(vendorTemplate.readinessProfileId!),
+    businessId: pinnedBusiness.id,
+    trustProfile: snapshotV1,
+    evaluatedAt: new Date(pinnedData.readiness!.evaluatedAt)
+  });
+  assert(JSON.stringify({
+    result: pinnedData.readiness?.result,
+    requirements: pinnedData.readiness?.requirements,
+    blockingIssues: pinnedData.readiness?.blockingIssues,
+    nextActions: pinnedData.readiness?.nextActions
+  }) === JSON.stringify({
+    result: expectedPinnedReadiness.result,
+    requirements: expectedPinnedReadiness.requirements,
+    blockingIssues: expectedPinnedReadiness.blockingIssues,
+    nextActions: expectedPinnedReadiness.nextActions
+  }), "pinned readiness decisions diverged from the pure evaluator");
+  for (const item of listReportTypes().filter((entry) => entry.readinessProfileId)) {
+    const template = getReportTemplate(item.reportType);
+    const definition = getReadinessProfile(template.readinessProfileId!);
+    const result = evaluateReadinessFromTrustProfile({ definition, businessId: pinnedBusiness.id, trustProfile: snapshotV1 });
+    assert(result.businessId === pinnedBusiness.id && result.requirements.length > 0, `${item.reportType} did not evaluate pinned snapshot`);
+  }
 });
 
 await test("concurrent API report generations leave only complete reports", async () => {

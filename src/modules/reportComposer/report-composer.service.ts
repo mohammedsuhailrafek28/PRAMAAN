@@ -37,6 +37,7 @@ export async function generateReport(user: Express.User, reportTypeRaw: string) 
     reportVersion: data.template.reportVersion,
     trustProfileId: data.passport.id,
     readinessEvaluationId: data.readinessEvaluationId,
+    pinnedEvidenceIds,
     snapshot,
     generatedAt,
     createdByUserId: user.id
@@ -54,6 +55,7 @@ type ReportPersistenceInput = {
   reportVersion: string;
   trustProfileId: string;
   readinessEvaluationId: string | null;
+  pinnedEvidenceIds: readonly string[];
   snapshot: ReportDocument;
   generatedAt: Date;
   createdByUserId: string;
@@ -65,7 +67,7 @@ export async function persistReportAtomically(client: ReportPersistenceClient, i
     reportId: input.reportId,
     businessId: input.businessId,
     passportId: input.trustProfileId,
-    pinnedEvidenceIds: input.snapshot.evidence.map((item) => item.documentId).filter((id): id is string => typeof id === "string")
+    pinnedEvidenceIds: input.pinnedEvidenceIds
   });
   const report = await client.generatedReport.create({
     data: {

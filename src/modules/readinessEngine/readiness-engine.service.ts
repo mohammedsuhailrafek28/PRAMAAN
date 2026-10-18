@@ -6,7 +6,8 @@ import { calculateAndPersistBusinessTrustProfile } from "../trustEngine/trust-en
 import { getReadinessProfile, listReadinessProfiles } from "./readiness-profile.registry.js";
 import { evaluateRequirement } from "./requirement-evaluator.js";
 import { composeReadinessEvaluation } from "./readiness-profile-composer.js";
-import type { BlockingIssue } from "./readiness-engine.types.js";
+import type { BlockingIssue, ReadinessEvaluationResponse } from "./readiness-engine.types.js";
+import type { BusinessTrustProfile } from "../trustEngine/trust-engine.types.js";
 
 export { listReadinessProfiles };
 
@@ -23,21 +24,56 @@ export async function evaluateForMsme(user: Express.User, profileId: string) {
 
   const definition = getReadinessProfile(profileId);
   const { profile: trustProfile } = await calculateAndPersistBusinessTrustProfile(business.id);
-  const requirements = definition.requirements.map((requirement) => evaluateRequirement(definition, requirement, trustProfile));
-  const blockingIssues = collectBlockingIssues(definition, trustProfile, requirements);
-  const evaluatedAt = new Date();
-  const draft = composeReadinessEvaluation({
-    definition,
-    businessId: business.id,
-    trustProfile,
+  return persistReadinessEvaluation(user.id, business.id, definition, trustProfile);
+}
+
+/** Pure readiness evaluation against an already selected immutable Trust Profile state. */
+export function evaluateReadinessFromTrustProfile(input: {
+  definition: ReturnType<typeof getReadinessProfile>;
+  businessId: string;
+  trustProfile: BusinessTrustProfile;
+  evaluatedAt?: Date;
+}): ReadinessEvaluationResponse {
+  const requirements = input.definition.requirements.map((requirement) => evaluateRequirement(input.definition, requirement, input.trustProfile));
+  const blockingIssues = collectBlockingIssues(input.definition, input.trustProfile, requirements);
+  return composeReadinessEvaluation({
+    definition: input.definition,
+    businessId: input.businessId,
+    trustProfile: input.trustProfile,
     requirements,
     blockingIssues,
-    evaluatedAt
+    evaluatedAt: input.evaluatedAt ?? new Date()
   });
+}
 
+/** Persist readiness derived from a caller-selected snapshot without recalculating live documents. */
+export async function evaluateForMsmeFromTrustProfile(
+  user: Express.User,
+  profileId: string,
+  trustProfile: BusinessTrustProfile
+) {
+  if (user.role !== UserRole.MSME) {
+    throw new ApiError(403, "FORBIDDEN", "Only MSMEs can evaluate private readiness profiles.");
+  }
+  const business = await prisma.business.findUnique({ where: { userId: user.id } });
+  if (!business) throw new ApiError(404, "NOT_FOUND", "Business profile not found.");
+  if (trustProfile.businessId !== business.id) {
+    throw new ApiError(500, "INVALID_TRUST_PROFILE_SNAPSHOT", "Trust Profile snapshot does not belong to the business.");
+  }
+  return persistReadinessEvaluation(user.id, business.id, getReadinessProfile(profileId), trustProfile);
+}
+
+async function persistReadinessEvaluation(
+  actorId: string,
+  businessId: string,
+  definition: ReturnType<typeof getReadinessProfile>,
+  trustProfile: BusinessTrustProfile
+) {
+  const evaluatedAt = new Date();
+  const draft = evaluateReadinessFromTrustProfile({ definition, businessId, trustProfile, evaluatedAt });
   const persisted = await prisma.readinessEvaluation.create({
     data: {
-      businessId: business.id,
+      businessId,
       profileId: definition.id,
       profileVersion: definition.version,
       score: draft.result.score,
@@ -47,16 +83,14 @@ export async function evaluateForMsme(user: Express.User, profileId: string) {
       evaluatedAt
     }
   });
-
   const response = { ...draft, evaluationId: persisted.id };
   await prisma.readinessEvaluation.update({
     where: { id: persisted.id },
     data: { summaryJson: response as Prisma.InputJsonValue }
   });
-
   await writeAuditLog({
-    businessId: business.id,
-    actorId: user.id,
+    businessId,
+    actorId,
     action: AuditAction.READINESS_PROFILE_EVALUATED,
     metadata: {
       profileId: definition.id,
@@ -69,8 +103,8 @@ export async function evaluateForMsme(user: Express.User, profileId: string) {
   });
   if (response.result.blocked) {
     await writeAuditLog({
-      businessId: business.id,
-      actorId: user.id,
+      businessId,
+      actorId,
       action: AuditAction.READINESS_PROFILE_BLOCKED,
       metadata: {
         profileId: definition.id,
@@ -83,7 +117,6 @@ export async function evaluateForMsme(user: Express.User, profileId: string) {
       }
     });
   }
-
   return response;
 }
 
