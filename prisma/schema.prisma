@@ -52,6 +52,16 @@ enum DocumentType {
   BANK_STATEMENT
 }
 
+enum OnboardingAssignmentStatus {
+  REQUESTED
+  ACCEPTED
+  DECLINED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
 enum ConsentStatus {
   PENDING
   APPROVED
@@ -101,6 +111,11 @@ enum AuditAction {
   GUEST_LINK_EXPIRED
   EVIDENCE_UPLOADED
   EVIDENCE_REPLACED
+  ONBOARDING_PACK_ASSIGNED
+  ONBOARDING_PACK_ACCEPTED
+  ONBOARDING_PACK_DECLINED
+  ONBOARDING_PACK_CANCELLED
+  ONBOARDING_PACK_COMPLETED
 }
 
 enum AccessGrantStatus {
@@ -124,6 +139,7 @@ model User {
   generatedReports GeneratedReport[] @relation("ReportCreator")
   accessGrantsCreated AccessGrant[] @relation("GrantCreator")
   accessGrantsRequested AccessGrant[] @relation("GrantRequester")
+  onboardingAssignmentsRequested OnboardingPackAssignment[] @relation("OnboardingRequester")
   requesterAssurance RequesterAssurance?
   requesterAssuranceEvents RequesterAssuranceEvent[]
 }
@@ -185,6 +201,7 @@ model Business {
   readinessEvaluations ReadinessEvaluation[]
   generatedReports   GeneratedReport[]
   accessGrants       AccessGrant[]
+  onboardingAssignments OnboardingPackAssignment[]
 }
 
 model Document {
@@ -253,6 +270,31 @@ model ConsentRequest {
   notifications   Notification[]
 }
 
+model OnboardingPackAssignment {
+  id                  String   @id @default(cuid())
+  businessId          String
+  requesterId         String
+  packKey             String
+  packVersion         String
+  activeKey           String?  @unique
+  requirementsSnapshot Json
+  purpose             String
+  status              OnboardingAssignmentStatus @default(REQUESTED)
+  createdAt           DateTime @default(now())
+  acceptedAt          DateTime?
+  declinedAt          DateTime?
+  cancelledAt         DateTime?
+  completedAt         DateTime?
+  business            Business @relation(fields: [businessId], references: [id])
+  requester           User @relation("OnboardingRequester", fields: [requesterId], references: [id])
+  auditLogs           AuditLog[]
+  notifications       Notification[]
+
+  @@index([businessId, status, createdAt])
+  @@index([requesterId, status, createdAt])
+  @@index([packKey, packVersion])
+}
+
 model AccessGrant {
   id                    String           @id @default(cuid())
   businessId            String
@@ -285,6 +327,7 @@ model AuditLog {
   businessId       String
   consentRequestId String?
   accessGrantId    String?
+  onboardingAssignmentId String?
   actorId          String
   action           AuditAction
   metadata         Json?
@@ -292,6 +335,7 @@ model AuditLog {
   business         Business        @relation(fields: [businessId], references: [id])
   consentRequest   ConsentRequest? @relation(fields: [consentRequestId], references: [id])
   accessGrant      AccessGrant? @relation(fields: [accessGrantId], references: [id])
+  onboardingAssignment OnboardingPackAssignment? @relation(fields: [onboardingAssignmentId], references: [id])
   actor            User            @relation("ActorAuditLogs", fields: [actorId], references: [id])
 }
 
@@ -301,9 +345,11 @@ model Notification {
   message          String
   readFlag         Boolean         @default(false)
   relatedConsentId String?
+  relatedOnboardingAssignmentId String?
   createdAt        DateTime        @default(now())
   user             User            @relation(fields: [userId], references: [id])
   relatedConsent   ConsentRequest? @relation(fields: [relatedConsentId], references: [id])
+  relatedOnboardingAssignment OnboardingPackAssignment? @relation(fields: [relatedOnboardingAssignmentId], references: [id])
 }
 
 model ReadinessEvaluation {

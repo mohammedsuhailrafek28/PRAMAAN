@@ -26,6 +26,9 @@ export const ROUTES = {
   reports: "/msme/reports",
   activity: "/msme/audit-log",
   msmeSettings: "/msme/settings",
+  msmeOnboarding: "/msme/onboarding",
+  buyerOnboarding: "/buyer/onboarding",
+  bankOnboarding: "/bank/onboarding",
 } as const;
 
 export interface NavItem {
@@ -57,6 +60,7 @@ export const NAV_BY_ROLE: Record<Role, NavSection[]> = {
         { to: ROUTES.activity, label: "Activity", icon: History },
       ],
     },
+    { label: "Collect", items: [{ to: ROUTES.msmeOnboarding, label: "Onboarding packs", icon: ClipboardCheck }] },
     {
       label: "Prepare",
       items: [
@@ -67,11 +71,11 @@ export const NAV_BY_ROLE: Record<Role, NavSection[]> = {
     { label: "Account", items: [{ to: ROUTES.msmeSettings, label: "Settings", icon: Settings }] },
   ],
   buyer: [
-    { items: [{ to: "/buyer/dashboard", label: "Verification Workspace", icon: Search }] },
+    { items: [{ to: "/buyer/dashboard", label: "Verification Workspace", icon: Search }, { to: ROUTES.buyerOnboarding, label: "Onboarding packs", icon: ClipboardCheck }] },
     { label: "Account", items: [{ to: "/buyer/settings", label: "Settings", icon: Settings }] },
   ],
   bank: [
-    { items: [{ to: "/bank/dashboard", label: "Verification Workspace", icon: Search }] },
+    { items: [{ to: "/bank/dashboard", label: "Verification Workspace", icon: Search }, { to: ROUTES.bankOnboarding, label: "Onboarding packs", icon: ClipboardCheck }] },
     { label: "Account", items: [{ to: "/bank/settings", label: "Settings", icon: Settings }] },
   ],
 };

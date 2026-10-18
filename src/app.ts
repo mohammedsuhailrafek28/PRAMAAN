@@ -21,6 +21,7 @@ import notificationRoutes from "./modules/notifications/notifications.routes.js"
 import readinessRoutes from "./modules/readinessEngine/readiness.routes.js";
 import reportRoutes from "./modules/reportComposer/report.routes.js";
 import accessGrantRoutes, { guestRouter } from "./modules/accessGrant/accessGrant.routes.js";
+import onboardingRoutes from "./modules/onboarding/onboarding.routes.js";
 
 export const app = express();
 
@@ -133,6 +134,7 @@ app.use("/api", reportRoutes);
 app.use("/api/audit-logs", auditRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/access-grants", accessGrantRoutes);
+app.use("/api/onboarding", onboardingRoutes);
 app.use("/api/public/verify", guestRouter);
 
 app.use(notFoundHandler);
