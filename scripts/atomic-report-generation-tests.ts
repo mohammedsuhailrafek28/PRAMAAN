@@ -110,7 +110,7 @@ async function persist(input: Partial<Parameters<typeof persistReportAtomically>
     reportVersion: "1.0",
     trustProfileId: passport.id,
     readinessEvaluationId: null,
-      pinnedEvidenceIds: ["doc-1"],
+      pinnedEvidenceIds: input.pinnedEvidenceIds ?? ["doc-1"],
     snapshot,
     generatedAt: new Date(),
     createdByUserId: input.createdByUserId ?? user.id
@@ -122,6 +122,37 @@ await test("complete snapshot is validated before persistence", async () => {
   assert(validateReportDocument(document(reportId, business.id), { reportId, businessId: business.id }) === undefined, "valid snapshot rejected");
   await rejects(Promise.resolve().then(() => validateReportDocument({ ...document(reportId, business.id), headline: undefined } as never, { reportId, businessId: business.id })));
   assert(await prisma.generatedReport.count({ where: { id: reportId } }) === 0, "invalid snapshot created a row");
+});
+
+await test("authoritative pinned evidence IDs are mandatory and well formed at runtime", async () => {
+  const baseInput = {
+    reportId: newCuid(),
+    businessId: business.id,
+    reportType: ReportType.BUSINESS_TRUST_PROFILE,
+    reportVersion: "1.0",
+    trustProfileId: passport.id,
+    readinessEvaluationId: null,
+    snapshot: document("placeholder", business.id, passport.id),
+    generatedAt: new Date(),
+    createdByUserId: user.id
+  };
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ["omitted", {}],
+    ["null", { pinnedEvidenceIds: null }],
+    ["non-array", { pinnedEvidenceIds: "doc-1" }],
+    ["malformed element", { pinnedEvidenceIds: ["doc-1", 7] }]
+  ];
+  for (const [name, override] of cases) {
+    const reportId = newCuid();
+    const snapshot = document(reportId, business.id, passport.id);
+    await rejects(prisma.$transaction((tx) => persistReportAtomically(tx, {
+      ...baseInput,
+      ...override,
+      reportId,
+      snapshot
+    } as never)));
+    assert(await prisma.generatedReport.count({ where: { id: reportId } }) === 0, `${name} input persisted a report`);
+  }
 });
 
 await test("sixteen malformed nested report shapes are rejected", async () => {

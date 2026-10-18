@@ -63,11 +63,12 @@ type ReportPersistenceInput = {
 
 /** Create the complete report and its audit record inside the caller's transaction. */
 export async function persistReportAtomically(client: ReportPersistenceClient, input: ReportPersistenceInput) {
+  const pinnedEvidenceIds = requirePinnedEvidenceIds(input.pinnedEvidenceIds);
   validateReportDocument(input.snapshot, {
     reportId: input.reportId,
     businessId: input.businessId,
     passportId: input.trustProfileId,
-    pinnedEvidenceIds: input.pinnedEvidenceIds
+    pinnedEvidenceIds
   });
   const report = await client.generatedReport.create({
     data: {
@@ -93,6 +94,16 @@ export async function persistReportAtomically(client: ReportPersistenceClient, i
   });
 
   return report;
+}
+
+function requirePinnedEvidenceIds(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) {
+    throw new Error("pinnedEvidenceIds must be an array supplied by the report generator.");
+  }
+  if (value.some((id) => typeof id !== "string" || id.length === 0)) {
+    throw new Error("pinnedEvidenceIds must contain only non-empty evidence IDs.");
+  }
+  return value;
 }
 
 export async function listReports(user: Express.User, filters: { reportType?: string; revoked?: string }) {
