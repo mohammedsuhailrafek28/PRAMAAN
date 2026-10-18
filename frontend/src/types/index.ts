@@ -215,6 +215,43 @@ export interface Notification {
   relatedConsentId?: string;
 }
 
+export type OnboardingAssignmentStatus = "REQUESTED" | "ACCEPTED" | "DECLINED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED" | "EXPIRED";
+export type OnboardingChecklistStatus = "MISSING" | "SUBMITTED" | "EXPIRED" | "REJECTED" | "CONTRADICTED" | "OUTSTANDING" | "RECEIVED";
+export interface OnboardingPackRequirement {
+  key: string;
+  label: string;
+  kind: "DOCUMENT";
+  documentType: string;
+  required: boolean;
+  description: string;
+}
+export interface OnboardingPack {
+  key: string;
+  version: string;
+  name: string;
+  audience: string;
+  description: string;
+  requirements: OnboardingPackRequirement[];
+}
+export interface OnboardingChecklistItem extends OnboardingPackRequirement {
+  status: OnboardingChecklistStatus;
+  evidenceStatus?: string | null;
+}
+export interface OnboardingAssignment {
+  id: string;
+  pack: { key: string; version: string };
+  business: { id: string; legalName?: string | null; gstin?: string | null };
+  requester: { id: string; organizationName?: string; role: string; identity: RequesterIdentity };
+  purpose: string;
+  status: OnboardingAssignmentStatus;
+  createdAt: string;
+  acceptedAt?: string | null;
+  declinedAt?: string | null;
+  cancelledAt?: string | null;
+  completedAt?: string | null;
+  checklist: OnboardingChecklistItem[];
+}
+
 
 export interface AccessGrant {
   id: string;

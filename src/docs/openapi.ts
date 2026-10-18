@@ -690,6 +690,59 @@ export const openApiSpec = {
         responses: { "200": { description: "Revoked report metadata and snapshot" } }
       }
     },
+    "/api/onboarding/packs": {
+      get: {
+        tags: ["Onboarding packs"],
+        summary: "List published onboarding packs",
+        description: "Returns the immutable vendor-onboarding pack v1.0. Pack definitions are collection checklists only; they never grant consent or Trust View access.",
+        security: [{ bearerAuth: [] }],
+        responses: { "200": { description: "Published onboarding packs" } }
+      }
+    },
+    "/api/onboarding/packs/{key}/{version}": {
+      get: {
+        tags: ["Onboarding packs"],
+        summary: "Get a published onboarding pack version",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "key", in: "path", required: true, schema: { type: "string", example: "vendor-onboarding" } }, { name: "version", in: "path", required: true, schema: { type: "string", example: "1.0" } }],
+        responses: { "200": { description: "Pack definition" }, "404": { description: "Published pack version not found", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } } }
+      }
+    },
+    "/api/onboarding/assignments": {
+      post: {
+        tags: ["Onboarding packs"],
+        summary: "Create a pack assignment for an MSME",
+        description: "Buyer or bank only. This creates a collection request and does not disclose raw evidence or create consent.",
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["businessGstin", "packKey", "purpose"], properties: { businessGstin: { type: "string" }, packKey: { type: "string", example: "vendor-onboarding" }, packVersion: { type: "string", example: "1.0" }, purpose: { type: "string" } } } } } },
+        responses: { "201": { description: "Assignment created" }, "403": { $ref: "#/components/responses/Forbidden" } }
+      },
+      get: {
+        tags: ["Onboarding packs"],
+        summary: "List incoming or outgoing pack assignments",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "scope", in: "query", required: true, schema: { type: "string", enum: ["incoming", "outgoing"] } }],
+        responses: { "200": { description: "Assignments with role-safe checklist progress" } }
+      }
+    },
+    "/api/onboarding/assignments/{id}": {
+      get: {
+        tags: ["Onboarding packs"],
+        summary: "Get an owned pack assignment",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "Assignment detail" }, "403": { $ref: "#/components/responses/Forbidden" } }
+      }
+    },
+    "/api/onboarding/assignments/{id}/accept": {
+      patch: { tags: ["Onboarding packs"], summary: "MSME accepts a pending assignment", security: [{ bearerAuth: [] }], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "Accepted assignment" } } }
+    },
+    "/api/onboarding/assignments/{id}/decline": {
+      patch: { tags: ["Onboarding packs"], summary: "MSME declines a pending assignment", security: [{ bearerAuth: [] }], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "Declined assignment" } } }
+    },
+    "/api/onboarding/assignments/{id}/cancel": {
+      patch: { tags: ["Onboarding packs"], summary: "Requester cancels its own assignment", security: [{ bearerAuth: [] }], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "Cancelled assignment" } } }
+    },
     "/api/audit-logs": {
       get: {
         tags: ["Audit"],
