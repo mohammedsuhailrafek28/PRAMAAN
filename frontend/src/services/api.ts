@@ -180,9 +180,10 @@ function mapTrustProfile(snapshot: any, fallbackId?: string): TrustProfile {
     contradictions: mapContradictions(snapshot?.contradictions),
     limitations: Array.isArray(snapshot?.limitations) ? snapshot.limitations.map(String) : [],
     sourceVerificationPerformed: false,
-    snapshotSchema: typeof snapshot?.snapshotSchema === "number" ? snapshot.snapshotSchema : undefined,
+    // Absent marker = genuine legacy snapshot. A marker that is present but not a number is an unknown format (-1), never legacy.
+    snapshotSchema: snapshot?.snapshotSchema === undefined || snapshot?.snapshotSchema === null ? undefined : typeof snapshot.snapshotSchema === "number" ? snapshot.snapshotSchema : -1,
     evidence: mapSnapshotEvidence(snapshot),
-    evidenceBasis: snapshot?.snapshotSchema === 2 && Array.isArray(snapshot?.evidence) ? "SNAPSHOT" : "LEGACY_SNAPSHOT",
+    evidenceBasis: snapshot?.snapshotSchema === undefined || snapshot?.snapshotSchema === null ? "LEGACY_SNAPSHOT" : "SNAPSHOT",
   };
 }
 

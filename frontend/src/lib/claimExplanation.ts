@@ -227,12 +227,22 @@ function sourceText(source: string): string {
   return source === "MSME_SUBMITTED" ? "Submitted by the business" : source;
 }
 
+/**
+ * Evidence is resolved by the snapshot's own schema marker, never by whether evidence[] happens to be empty:
+ *  - schema 2: only the embedded evidence[] records; an id that is not there is NOT_IN_SNAPSHOT;
+ *  - no marker (a genuine legacy snapshot): the per-document assessments, with metadata unavailable;
+ *  - any other marker: unknown format, so nothing is resolved.
+ */
 function resolveEvidence(profile: TrustProfile, ids: readonly string[]): EvidenceLine[] {
+  const schema = profile.snapshotSchema;
   return [...new Set(ids)].map((id) => {
-    const record = profile.evidence.find((item) => item.documentId === id);
-    if (record) return lineFromRecord(record);
-    const assessment = profile.documents.find((item) => item.documentId === id);
-    if (assessment) return lineFromLegacyAssessment(assessment);
+    if (schema === 2) {
+      const record = profile.evidence.find((item) => item.documentId === id);
+      if (record) return lineFromRecord(record);
+    } else if (schema === undefined) {
+      const assessment = profile.documents.find((item) => item.documentId === id);
+      if (assessment) return lineFromLegacyAssessment(assessment);
+    }
     return {
       documentId: id, found: false, basis: "NOT_IN_SNAPSHOT", docType: null, docTypeLabel: "Evidence record", revision: null, status: null,
       source: { kind: "UNAVAILABLE" }, issuedAt: { kind: "UNAVAILABLE" }, expiresAt: { kind: "UNAVAILABLE" }, uploadedAt: { kind: "UNAVAILABLE" }, checkedAt: { kind: "UNAVAILABLE" },
