@@ -3,7 +3,7 @@ import type {
   AuditActor, AuditLogEntry, Business, BusinessDocument, ConsentDurationHours,
   ConsentRequest, Contradiction, CrossCheckResult, DocumentCheck, EvidenceGap, FieldCheck,
   Notification, Role, TrustProfile, TrustViewResult, User, EvidenceStatus, TrustSummary,
-  AccessGrant, GuestLinkFailure, GuestVerificationView, SharedEvidence,
+  AccessGrant, GuestLinkFailure, GuestVerificationView, SharedEvidence, SnapshotEvidenceRecord,
   ReadinessEvaluation, ReadinessProfileSummary, ReportSummary, ReportType,
 } from "@/types";
 import { formatSharedFields } from "@/lib/sharedFields";
@@ -106,7 +106,10 @@ function mapBusiness(raw: any): Business {
 }
 
 function mapFieldChecks(raw: any[] | undefined): FieldCheck[] {
-  return (raw || []).map((item) => ({ field: item.field, value: item.value, status: item.status, confidence: item.confidence, reason: item.reason, checks: item.checks || [] }));
+  return (raw || []).map((item) => ({
+    field: item.field, value: item.value, status: item.status, confidence: item.confidence, reason: item.reason, checks: item.checks || [],
+    evidenceIds: Array.isArray(item.evidenceIds) ? item.evidenceIds.filter((id: unknown): id is string => typeof id === "string") : [],
+  }));
 }
 
 function mapDocumentChecks(raw: any[] | undefined): DocumentCheck[] {
@@ -114,11 +117,30 @@ function mapDocumentChecks(raw: any[] | undefined): DocumentCheck[] {
 }
 
 function mapGaps(raw: any[] | undefined): EvidenceGap[] {
-  return (raw || []).map((item) => ({ field: item.field, severity: item.severity, message: item.message }));
+  return (raw || []).map((item) => ({
+    field: item.field, severity: item.severity, message: item.message,
+    ...(Array.isArray(item.requiredEvidenceTypes) ? { requiredEvidenceTypes: item.requiredEvidenceTypes.map(String) } : {}),
+  }));
 }
 
 function mapContradictions(raw: any[] | undefined): Contradiction[] {
-  return (raw || []).map((item) => ({ field: item.field, severity: item.severity, reason: item.reason }));
+  return (raw || []).map((item) => ({
+    field: item.field, severity: item.severity, reason: item.reason,
+    claimedValue: item.claimedValue ?? null,
+    evidenceValues: Array.isArray(item.evidenceValues) ? item.evidenceValues.map(String) : [],
+  }));
+}
+
+/** Embedded schema-2 evidence records, kept exactly as recorded in the snapshot. */
+function mapSnapshotEvidence(snapshot: any): SnapshotEvidenceRecord[] {
+  if (snapshot?.snapshotSchema !== 2 || !Array.isArray(snapshot.evidence)) return [];
+  const text = (value: unknown) => (typeof value === "string" && value ? value : null);
+  return snapshot.evidence.filter((record: any) => record && typeof record === "object" && typeof record.documentId === "string").map((record: any) => ({
+    documentId: record.documentId, docType: String(record.docType), revision: Number.isInteger(record.revision) ? record.revision : null,
+    evidenceStatus: String(record.evidenceStatus), confidence: typeof record.confidence === "number" ? record.confidence : 0,
+    crossCheckMethod: text(record.crossCheckMethod), source: text(record.source), issuedAt: text(record.issuedAt), checkedAt: text(record.checkedAt),
+    expiresAt: text(record.expiresAt), uploadedAt: text(record.uploadedAt), checks: Array.isArray(record.checks) ? record.checks : [],
+  }));
 }
 
 function mapConsent(raw: any): ConsentRequest {
@@ -158,6 +180,9 @@ function mapTrustProfile(snapshot: any, fallbackId?: string): TrustProfile {
     contradictions: mapContradictions(snapshot?.contradictions),
     limitations: Array.isArray(snapshot?.limitations) ? snapshot.limitations.map(String) : [],
     sourceVerificationPerformed: false,
+    snapshotSchema: typeof snapshot?.snapshotSchema === "number" ? snapshot.snapshotSchema : undefined,
+    evidence: mapSnapshotEvidence(snapshot),
+    evidenceBasis: snapshot?.snapshotSchema === 2 && Array.isArray(snapshot?.evidence) ? "SNAPSHOT" : "LEGACY_SNAPSHOT",
   };
 }
 

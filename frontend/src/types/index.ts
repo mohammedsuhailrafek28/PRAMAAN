@@ -90,6 +90,8 @@ export interface FieldCheck {
   confidence: number;
   reason: string;
   checks: TrustCheck[];
+  /** Ids of the evidence documents this claim was assessed against (backend `evidenceIds`). */
+  evidenceIds: string[];
 }
 
 /** Document-level result from the internal cross-check engine. */
@@ -106,12 +108,36 @@ export interface EvidenceGap {
   field: string;
   severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | string;
   message: string;
+  requiredEvidenceTypes?: string[];
 }
 
 export interface Contradiction {
   field: string;
   severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | string;
   reason: string;
+  /** The submitted claim value that conflicted. Owner-facing data only. */
+  claimedValue?: string | null;
+  /** The values the claim was compared against. Owner-facing data only. */
+  evidenceValues?: string[];
+}
+
+/**
+ * Evidence record embedded in a schema-2 Trust Profile snapshot: the assessment
+ * and the upload-time attributes of the exact revision assessed in that version.
+ */
+export interface SnapshotEvidenceRecord {
+  documentId: string;
+  docType: string;
+  revision: number | null;
+  evidenceStatus: string;
+  confidence: number;
+  crossCheckMethod: string | null;
+  source: string | null;
+  issuedAt: string | null;
+  checkedAt: string | null;
+  expiresAt: string | null;
+  uploadedAt: string | null;
+  checks: TrustCheck[];
 }
 
 export interface TrustSummary {
@@ -148,6 +174,10 @@ export interface TrustProfile {
   contradictions: Contradiction[];
   limitations: string[];
   sourceVerificationPerformed: false;
+  /** Schema-2 snapshots embed evidence records; legacy snapshots do not. */
+  snapshotSchema?: number;
+  evidence: SnapshotEvidenceRecord[];
+  evidenceBasis: "SNAPSHOT" | "LEGACY_SNAPSHOT";
 }
 
 export type ConsentDurationHours = 24 | 168 | 720; // 24h / 7d / 30d

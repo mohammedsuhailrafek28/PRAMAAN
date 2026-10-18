@@ -9,12 +9,15 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { ErrorState, LoadingState } from "@/components/shared/AsyncState";
 import { SectionCard } from "@/components/shared/SectionCard";
 import { DescriptorBadge, EvidenceBadges, EvidenceStatusBadge } from "@/components/shared/EvidenceStatusBadge";
+import { TrustExplanationDialog } from "@/components/shared/TrustExplanationPanel";
+import { StatusPill } from "@/components/shared/StatusPill";
 import { ROUTES } from "@/components/layout/navigation";
 import { useAppStore } from "@/store/appStore";
 import { getApiError } from "@/services/api";
 import { isStaleSession } from "@/services/sessionEpoch";
 import { useToast } from "@/components/ui/use-toast";
 import { backendFieldLabel, documentTypeLabel, sourceLabel } from "@/lib/fieldLabels";
+import { CATEGORY_PRESENTATION, explainClaim } from "@/lib/claimExplanation";
 import { fieldFreshness, fieldValueText, TRUST_FIELDS } from "@/lib/trustProfileView";
 import { isTrustProfileOutdated } from "@/lib/evidenceSlots";
 import { describeFreshness, NOT_EXTERNALLY_VERIFIED } from "@/lib/trustVocabulary";
@@ -24,6 +27,8 @@ export function TrustProfilePage() {
   const { business, trustProfile, loadBusiness, generateTrustProfile, error } = useAppStore();
   const { toast } = useToast();
   const [generating, setGenerating] = useState(false);
+  // Which claim's explanation is open. Held only in this component, never persisted or shared.
+  const [explainField, setExplainField] = useState<string | null>(null);
 
   useEffect(() => { loadBusiness(); }, [loadBusiness]);
 
@@ -34,6 +39,16 @@ export function TrustProfilePage() {
       return check ? [{ ...definition, check }] : [];
     });
   }, [trustProfile]);
+
+  // Explanations are derived from the displayed snapshot only, so they always describe the same version as the table.
+  const explanations = useMemo(
+    () => new Map(trustProfile ? rows.map(({ field, label, mask, check }) => [field, explainClaim(trustProfile, check, { label, mask })] as const) : []),
+    [rows, trustProfile]
+  );
+
+  // Close any open explanation when the displayed Trust Profile is replaced or cleared.
+  const profileId = trustProfile?.id;
+  useEffect(() => { setExplainField(null); }, [profileId]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -94,7 +109,25 @@ export function TrustProfilePage() {
       <TrustCard profile={trustProfile} />
 
       <SectionCard title="Claims and checks" description={`As recorded in version ${trustProfile.version}. Last checked ${formatDateTime(trustProfile.lastCalculatedAt ?? trustProfile.generatedAt)}.`} contentClassName="p-0 sm:p-0">
-        <div className="overflow-x-auto">
+        <ul className="divide-y divide-slate-100 border-t border-slate-200 md:hidden" aria-label="Claims and their check status">
+          {rows.map(({ field, label, mono, mask, check }) => {
+            const explanation = explanations.get(field);
+            const presentation = explanation ? CATEGORY_PRESENTATION[explanation.category] : undefined;
+            return (
+              <li key={field} className="space-y-2 px-4 py-3.5">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="text-sm font-semibold text-slate-900">{label}</p>
+                  <EvidenceStatusBadge status={check.status} />
+                </div>
+                <p className={mono ? "break-all font-mono text-[13px] text-slate-800" : "break-words text-sm text-slate-800"}>{fieldValueText(check.value, mask)}</p>
+                {presentation && <StatusPill label={presentation.label} tone={presentation.tone} icon={presentation.icon} className="whitespace-normal" />}
+                {explanation && <p className="break-words text-xs leading-5 text-slate-600">{explanation.summary}</p>}
+                <Button type="button" variant="outline" size="sm" className="min-h-[44px] w-full" aria-label={`Why? Explanation for ${label}`} onClick={() => setExplainField(field)}>Why?</Button>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full min-w-[640px] text-left text-sm">
             <caption className="sr-only">Claims and their check status in this Trust Profile version</caption>
             <thead className="border-y border-slate-200 bg-slate-50 text-xs text-slate-500">
@@ -104,6 +137,7 @@ export function TrustProfilePage() {
                 <th scope="col" className="px-3 py-2.5 font-medium">Status</th>
                 <th scope="col" className="px-3 py-2.5 font-medium">Freshness</th>
                 <th scope="col" className="px-5 py-2.5 font-medium">How Pramaan knows</th>
+                <th scope="col" className="px-5 py-2.5 font-medium">Explanation</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -116,6 +150,7 @@ export function TrustProfilePage() {
                     <td className="px-3 py-3"><EvidenceStatusBadge status={check.status} /></td>
                     <td className="px-3 py-3">{freshness && <DescriptorBadge descriptor={freshness} />}</td>
                     <td className="px-5 py-3 text-xs leading-5 text-slate-600">{check.reason}</td>
+                    <td className="px-5 py-3"><Button type="button" variant="outline" size="sm" aria-label={`Why? Explanation for ${label}`} onClick={() => setExplainField(field)}>Why?</Button></td>
                   </tr>
                 );
               })}
@@ -177,6 +212,11 @@ export function TrustProfilePage() {
           </ul>
         </div>
       </SectionCard>
+      <TrustExplanationDialog
+        explanation={explainField ? explanations.get(explainField) ?? null : null}
+        open={explainField !== null}
+        onOpenChange={(open) => { if (!open) setExplainField(null); }}
+      />
     </div>
   );
 }
