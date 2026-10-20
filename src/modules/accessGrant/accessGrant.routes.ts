@@ -3,7 +3,7 @@ import { requireAuth } from "../../middleware/auth.js";
 import { validate } from "../../middleware/validate.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import * as controller from "./accessGrant.controller.js";
-import { guestConclusionRateLimit } from "../evidenceFirewall/firewall-rate-limit.js";
+import { guestConclusionRateLimit, guestIpConclusionRateLimit } from "../evidenceFirewall/firewall-rate-limit.js";
 import { z } from "zod";
 
 const router = Router();
@@ -25,5 +25,5 @@ const conclusion = z.union([
   z.object({ kind: z.literal("FIELD_NOT_CONTRADICTED"), field: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("EVIDENCE_CURRENT"), docType: z.string().min(1) }).strict()
 ]);
-guestRouter.post("/:token/conclusions", guestConclusionRateLimit, validate({ body: conclusion }), asyncHandler(controller.conclusions));
+guestRouter.post("/:token/conclusions", guestIpConclusionRateLimit, guestConclusionRateLimit, validate({ body: conclusion }), asyncHandler(controller.conclusions));
 export default router;

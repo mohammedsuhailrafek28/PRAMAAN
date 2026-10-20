@@ -142,12 +142,12 @@ test("a current revision supports the claim even if an older revision of the sam
   expect(run(supported("gstin"), { snapshot }), "SUPPORTED", "SUPPORTED_INTERNALLY", "mirrors the engine's 'some current document' rule");
 });
 
-test("D1: a hidden contradiction withholds a positive conclusion, with no detail", () => {
+test("M1: a hidden contradiction cannot change a visible field conclusion", () => {
   const pan = buildSnapshot({ pan: "ZZZZZ9999Z" });
-  for (const request of [supported("gstin"), noConflict("gstin")]) expect(run(request, { snapshot: pan }), ...UNAVAILABLE, `gstin ${request.kind}`);
+  for (const request of [supported("gstin"), noConflict("gstin")]) expect(run(request, { snapshot: pan }), "SUPPORTED", request.kind === "FIELD_SUPPORTED_BY_EVIDENCE" ? "SUPPORTED_INTERNALLY" : "NO_RECORDED_CONFLICT", `gstin ${request.kind}`);
   expect(run(supported("udyamNumber"), { snapshot: pan }), "SUPPORTED", "SUPPORTED_INTERNALLY", "unrelated claim is unaffected");
   const org = buildSnapshot({ orgName: "Different Org Ltd" });
-  expect(run(noConflict("legalBusinessName"), { snapshot: org }), ...UNAVAILABLE, "name conflict withheld");
+  expect(run(noConflict("legalBusinessName"), { snapshot: org }), "SUPPORTED", "NO_RECORDED_CONFLICT", "hidden name conflict does not alter visible result");
   expect(run(supported("gstin"), { snapshot: org }), "SUPPORTED", "SUPPORTED_INTERNALLY", "gstin is not involved in the name conflict");
   const text = JSON.stringify(run(supported("gstin"), { snapshot: pan }));
   assert(!/ZZZZZ|ABCDE|pan|conflict|Different Org/i.test(text), `no conflict detail in ${text}`);
@@ -160,7 +160,7 @@ test("a visible contradiction (every involved item authorised) is CONTRADICTED a
   expect(run(noConflict("udyamNumber"), { snapshot, policy }), "CONTRADICTED", "RECORDED_CONFLICT", "this policy also involves udyamNumber");
   expect(run(noConflict("address"), { snapshot, policy }), "SUPPORTED", "NO_RECORDED_CONFLICT", "an uninvolved claim is unaffected");
   const narrowed = grant({ approvedFields: ["gstin"] });
-  expect(run(supported("gstin"), { snapshot, policy, authorization: narrowed }), ...UNAVAILABLE, "a partner field outside scope makes it hidden, not visible");
+  expect(run(supported("gstin"), { snapshot, policy, authorization: narrowed }), "SUPPORTED", "SUPPORTED_INTERNALLY", "a partner field outside scope is not disclosed or used");
   const expiredToo = buildSnapshot({ pan: "ZZZZZ9999Z", docs: [{ id: "doc-gst", docType: "GST_CERTIFICATE", expiresInDays: -5 }] });
   expect(run(supported("gstin"), { snapshot: expiredToo, policy }), "CONTRADICTED", "RECORDED_CONFLICT", "a visible conflict outranks expiry");
 });
@@ -170,14 +170,15 @@ test("a visible, truthful insufficiency is reported before a hidden conflict is 
   expect(run(supported("gstin"), { snapshot }), "INSUFFICIENT_EVIDENCE", "EVIDENCE_EXPIRED", "expired evidence is the stated cause");
 });
 
-test("the withheld-conflict code is shared with unrelated inconclusive causes (it is not unique to hidden conflicts)", () => {
+test("hidden mapped contradictions are distinguishable from malformed or inconclusive visible checks", () => {
   const hidden = run(supported("gstin"), { snapshot: buildSnapshot({ pan: "ZZZZZ9999Z" }) });
   const anomaly = buildSnapshot();
   anomaly.fieldConfidence.find((entry: any) => entry.field === "gstin").checks.push({ type: "SOME_FUTURE_CHECK", result: "MAYBE", reason: "x" });
   const inconclusive = run(supported("gstin"), { snapshot: anomaly });
-  same(hidden, inconclusive, "indistinguishable decisions");
+  expect(hidden, "SUPPORTED", "SUPPORTED_INTERNALLY", "hidden mapped contradiction does not alter the visible result");
+  expect(inconclusive, ...UNAVAILABLE, "unknown visible check remains fail closed");
   const unsuitable = run(supported("gstin"), { snapshot: { snapshotSchema: 2 } });
-  same({ ...hidden, snapshotVersion: null }, unsuitable, "also indistinguishable from an unsuitable snapshot");
+  same({ ...inconclusive, snapshotVersion: null }, unsuitable, "also indistinguishable from an unsuitable snapshot");
 });
 
 test("an unclassifiable contradiction fails closed for every positive conclusion", () => {
@@ -189,11 +190,11 @@ test("an unclassifiable contradiction fails closed for every positive conclusion
   expect(run(supported("gstin"), { snapshot: expired }), "INSUFFICIENT_EVIDENCE", "EVIDENCE_EXPIRED", "visible cause still wins");
 });
 
-test("a field's own recorded consistency failure is a hidden conflict", () => {
+test("a field's own hidden consistency failure does not alter an otherwise sufficient visible result", () => {
   const snapshot = buildSnapshot();
   const entry = snapshot.fieldConfidence.find((item: any) => item.field === "address");
   entry.checks.push({ type: "INTERNAL_CONSISTENCY", result: "FAILED", reason: "x" });
-  expect(run(noConflict("address"), { snapshot }), ...UNAVAILABLE, "withheld");
+  expect(run(noConflict("address"), { snapshot }), "SUPPORTED", "NO_RECORDED_CONFLICT", "hidden counterparty is not disclosed");
 });
 
 test("decisions carry only the closed output shape and never echo values, ids or counts", () => {
@@ -477,7 +478,7 @@ test("hidden data affects output only through the withholding path: unauthorised
   assert(baseline.includes("SUPPORTED"), "baseline is positive");
 });
 
-test("hidden contradiction detail (values, wording, severity) never changes the withheld decision", () => {
+test("hidden contradiction detail (values, wording, severity) never changes the visible decision", () => {
   const variants = [{ claimedValue: "A", evidenceValues: ["B"], reason: "one", severity: "HIGH" }, { claimedValue: null, evidenceValues: [], reason: "two", severity: "LOW" }, { claimedValue: "ZZZ", evidenceValues: ["1", "2", "3"], reason: "", severity: "CRITICAL" }];
   const results = variants.map((variant) => {
     const snapshot = buildSnapshot();
@@ -485,17 +486,17 @@ test("hidden contradiction detail (values, wording, severity) never changes the 
     return JSON.stringify(run(supported("gstin"), { snapshot }));
   });
   assert(new Set(results).size === 1, `varies with hidden detail: ${results.join(" | ")}`);
-  assert(results[0].includes("CONFIRMATION_UNAVAILABLE"), "withheld");
+  assert(results[0].includes("SUPPORTED"), "visible conclusion changed");
 });
 
-test("a hidden conflict can only turn a positive verdict into CONFIRMATION_UNAVAILABLE", () => {
+test("a mapped hidden conflict does not turn a positive verdict into an inference signal", () => {
   const clean = run(supported("gstin"));
   const snapshot = buildSnapshot();
   snapshot.contradictions.push({ field: "pan", severity: "HIGH", reason: "x", claimedValue: "A", evidenceValues: ["B"] });
   const withheld = run(supported("gstin"), { snapshot });
   expect(clean, "SUPPORTED", "SUPPORTED_INTERNALLY", "clean");
-  expect(withheld, ...UNAVAILABLE, "withheld");
-  same({ ...clean, verdict: "INSUFFICIENT_EVIDENCE", reasonCode: "CONFIRMATION_UNAVAILABLE" }, withheld, "everything else is identical");
+  expect(withheld, "SUPPORTED", "SUPPORTED_INTERNALLY", "hidden mapped contradiction is ignored for this visible field");
+  same(clean, withheld, "everything else is identical");
 });
 
 test("claims that do not exist, are undisclosed or are unauthorised are indistinguishable", () => {

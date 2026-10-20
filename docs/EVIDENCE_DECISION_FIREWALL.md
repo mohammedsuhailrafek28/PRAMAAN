@@ -97,15 +97,17 @@ Policy table `contradictionInvolves` maps a recorded contradiction `field` to th
   malformed entry, cannot be classified → treated as relevant to **every** positive conclusion (fail closed).
 * **Visible** iff every involved item is a disclosable item inside the authorised scope (none is `UNDISCLOSABLE`).
   Visible and relevant → `CONTRADICTED` / `RECORDED_CONFLICT`. No values are returned.
-* **Hidden** (some involved item is undisclosable or outside scope) and relevant → the conflict is **withheld**:
-  a would-be positive verdict becomes `INSUFFICIENT_EVIDENCE` / `CONFIRMATION_UNAVAILABLE`. No detail is revealed.
-* The field's own recorded `INTERNAL_CONSISTENCY` failure is a conflict with an unidentified counterparty → hidden.
+* **Hidden** (some involved item is undisclosable or outside scope) and relevant does not change the visible
+  field-level conclusion. No hidden detail is returned.
+* The field's own recorded `INTERNAL_CONSISTENCY` failure is ignored only when visible evidence/checks are otherwise
+  sufficient; visible failed checks and visible contradictions still produce the appropriate non-positive result.
+* An unclassifiable contradiction remains a snapshot-integrity failure and returns `CONFIRMATION_UNAVAILABLE`.
 * Contradictions are only considered after authorisation passes.
 
 **Decision precedence** (first match wins):
 `NOT_DISCLOSABLE` → snapshot unsuitable → `CONTRADICTED` (visible) → visible insufficiency
 (`CLAIM_NOT_PROVIDED`, `NO_EVIDENCE_MAPPING`, `EVIDENCE_MISSING`, `EVIDENCE_EXPIRED`, inconclusive checks) →
-withheld hidden conflict → `SUPPORTED`.
+`SUPPORTED` follows once visible checks are sufficient; hidden mapped contradictions are not a second signal.
 Visible insufficiency comes before withholding on purpose: a truthful, visible cause never exposes the hidden one,
 and a conflict is never converted into `SUPPORTED`.
 
@@ -116,9 +118,8 @@ contradictions, and withheld hidden conflicts. It is deliberately not unique to 
 
 This module does **not** provide noninterference. Known, accepted inferences:
 
-* **L1** `CONFIRMATION_UNAVAILABLE` on a claim that otherwise looks healthy tells the requester that *something
-  unconfirmable exists* (a hidden conflict, a field-level consistency failure, or a snapshot/check anomaly). It cannot
-  tell which. This is the D1 leak.
+* **L1** Hidden mapped contradictions do not alter a visible field-level result. An unclassifiable or malformed
+  contradiction still makes the snapshot unavailable because the server cannot safely determine what it represents.
 * **L2** `NOT_DISCLOSABLE` merges scope, expiry, revocation, pin and assurance denials. A requester knows its own
   scope and lifecycle; the single code avoids adding any information beyond that, and does not distinguish "no such
   claim" from "not allowed".
@@ -133,10 +134,13 @@ This module does **not** provide noninterference. Known, accepted inferences:
   requester may not see) make every positive conclusion `CONFIRMATION_UNAVAILABLE`. This is a second channel through which
   hidden data influences output, beyond hidden-conflict withholding.
 
-What *is* tested: hidden data (unauthorised fields, unauthorised evidence, contradiction values, conflict detail,
+Historical test note (superseded by the field-level policy above): hidden data (unauthorised fields, unauthorised evidence, contradiction values,
+conflict detail, and other claims) is exercised by the paired tests. The current contract is:
+<!-- superseded wording retained only for historical context; the current behavior is defined above. -->
 other claims) changes the output **only** through the withholding path in §4 — mutating well-formed hidden data otherwise leaves the
-serialised decision byte-identical (integrity failures, L7, are the exception); mutating a hidden conflict can only turn a positive verdict into
-`CONFIRMATION_UNAVAILABLE`.
+  field-level result when the hidden data is well-formed; mapped hidden contradictions are ignored for that field, while malformed or
+  unclassifiable snapshot data still fails closed as `CONFIRMATION_UNAVAILABLE` under L7.
+<!-- end superseded wording -->
 
 ## 6. Output
 

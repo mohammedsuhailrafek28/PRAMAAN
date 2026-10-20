@@ -63,5 +63,11 @@ The existing API limiter remains active. The two conclusion routes also use narr
 limiters keyed by the database user ID for registered calls and by `sha256(token):ip` for guest calls. Client body
 values are never used as identities. No database-backed limiter is required for the Horizon demo.
 
-Conclusion evaluations do not add AuditLog rows in this slice. The existing audit behavior is preserved and a dedicated
-`CONCLUSION_EVALUATED` action is deferred because it would require migration 11 and a separate product decision.
+Conclusion evaluations write `CONCLUSION_EVALUATED` through the existing audit service in the same transaction as the
+server-owned load and evaluation. Metadata contains only the channel, closed query kind and evaluation timestamp,
+plus the existing consent/grant relation and bounded actor. It never contains verdicts, values, evidence IDs, tokens or
+contradiction details. If the audit write fails, the transaction fails and the route returns `503 FIREWALL_UNAVAILABLE`;
+the response is not treated as successful. This is an additive migration after the existing eleven migrations.
+
+Guest conclusion calls also use an independent in-memory IP limiter in addition to the per-token limiter. The app
+explicitly does not trust forwarded headers, so spoofed `X-Forwarded-For` values do not rotate the limiter key.

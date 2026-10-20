@@ -39,7 +39,8 @@ app.use(
     }
   })
 );
-app.use(express.json());
+app.set("trust proxy", false);
+app.use(express.json({ limit: "1mb" }));
 app.use(requestId);
 app.use(
   pinoHttp({

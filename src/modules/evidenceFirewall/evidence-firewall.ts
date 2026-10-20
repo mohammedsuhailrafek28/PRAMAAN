@@ -1,6 +1,6 @@
 // Evidence Decision Firewall. Pure and deterministic: no clock, no I/O, no database, no module state.
 // Specification: docs/EVIDENCE_DECISION_FIREWALL.md. Precedence (first match wins):
-//   NOT_DISCLOSABLE > unsuitable snapshot > CONTRADICTED (visible) > visible insufficiency > withheld hidden conflict > SUPPORTED
+//   NOT_DISCLOSABLE > unsuitable snapshot > CONTRADICTED (visible) > visible insufficiency > SUPPORTED
 
 import { DEFAULT_FIREWALL_POLICY, FIREWALL_LIMITATION } from "./firewall-policy.js";
 import { isAuthorized, requiredItems } from "./firewall-authorization.js";
@@ -43,14 +43,15 @@ function evidenceGap(tally: Currency, version: number): FirewallDecision | null 
 function classifyContradictions(view: SnapshotView, field: string | null, approvedFields: ReadonlySet<string>, approvedEvidence: ReadonlySet<string>, policy: FirewallPolicy) {
   let visible = false;
   let hidden = false;
+  let unclassifiable = false;
   for (const contradiction of view.contradictions) {
-    if (!has(policy.contradictionInvolves, contradiction.field)) { hidden = true; continue; } // unclassifiable: fail closed
+    if (!has(policy.contradictionInvolves, contradiction.field)) { unclassifiable = true; continue; } // unclassifiable: fail closed
     const involved = policy.contradictionInvolves[contradiction.field];
     if (field === null || !involved.some((item) => item.kind === "FIELD" && item.key === field)) continue; // not about this claim
     const allVisible = involved.every((item) => (item.kind === "FIELD" && approvedFields.has(item.key)) || (item.kind === "EVIDENCE" && approvedEvidence.has(item.key)));
     if (allVisible) visible = true; else hidden = true;
   }
-  return { visible, hidden };
+  return { visible, hidden, unclassifiable };
 }
 
 function checksAreConclusive(checks: readonly CheckView[], ignore: readonly string[] = []) {
@@ -69,9 +70,6 @@ function evaluateField(input: FirewallInput, view: SnapshotView, policy: Firewal
 
   if (!entry || !entry.present || resultOf(entry.checks, "CLAIM_PRESENT").includes("FAILED")) return decision("INSUFFICIENT_EVIDENCE", "CLAIM_NOT_PROVIDED", version);
   if (entry.checks.some((check) => !knownResult(check.result))) return UNAVAILABLE(version);
-
-  // The field's own recorded consistency failure is a conflict with an unidentified counterparty: hidden.
-  const ownConflict = resultOf(entry.checks, "INTERNAL_CONSISTENCY").includes("FAILED");
 
   if (requireEvidence) {
     if (!has(policy.fieldEvidence, field)) return decision("INSUFFICIENT_EVIDENCE", "NO_EVIDENCE_MAPPING", version);
@@ -93,7 +91,9 @@ function evaluateField(input: FirewallInput, view: SnapshotView, policy: Firewal
     return UNAVAILABLE(version);
   }
 
-  if (conflicts.hidden || ownConflict) return UNAVAILABLE(version); // D1: conservative withholding, no detail
+  // A mapped contradiction involving undisclosed evidence must not change this field's
+  // visible conclusion. Visible checks and visible contradictions above still govern it.
+  if (conflicts.unclassifiable) return UNAVAILABLE(version);
   return requireEvidence ? decision("SUPPORTED", "SUPPORTED_INTERNALLY", version) : decision("SUPPORTED", "NO_RECORDED_CONFLICT", version);
 }
 
@@ -107,7 +107,7 @@ function evaluateEvidenceCurrent(input: FirewallInput, view: SnapshotView, polic
   if (records.some((record) => record.checks.some((check) => !knownResult(check.result)))) return UNAVAILABLE(version);
   // An unclassifiable recorded contradiction could involve any item: withhold rather than affirm.
   const conflicts = classifyContradictions(view, null, new Set(input.authorization.approvedFields), new Set(input.authorization.approvedEvidenceTypes), policy);
-  if (conflicts.hidden) return UNAVAILABLE(version);
+  if (conflicts.unclassifiable) return UNAVAILABLE(version);
   return decision("SUPPORTED", "EVIDENCE_UNEXPIRED", version);
 }
 

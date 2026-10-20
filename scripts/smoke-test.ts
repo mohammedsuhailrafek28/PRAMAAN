@@ -582,12 +582,69 @@ async function main() {
     assert(registeredConclusion.data.conclusion.result === "CONFIRMED", "registered Firewall conclusion was not confirmed");
     assert(registeredConclusion.data.conclusion.basis === "INTERNAL_DETERMINISTIC_CHECKS", "registered Firewall basis leaked an unexpected source");
     assert(!containsKey(registeredConclusion.data, "evidenceIds") && !containsKey(registeredConclusion.data, "snapshotJson"), "Firewall response leaked internal data");
+    const firewallGuest = await request("POST", "/api/access-grants", {
+      token: msmeToken,
+      body: { recipientName: "Firewall guest", purpose: "Business verification", scope: { fields: ["legalBusinessName", "gstin"], evidenceTypes: ["GST_CERTIFICATE"] }, durationHours: 24 }
+    });
+    const firewallGuestToken = (firewallGuest.data.grant.secureUrl as string).split("/verify/")[1];
+    const registeredNameBefore = await request("POST", `/api/trust-view/${consentId}/conclusions`, { token: buyerToken, body: { kind: "FIELD_NOT_CONTRADICTED", field: "legalBusinessName" } });
+    const guestGstinBefore = await request("POST", `/api/public/verify/${firewallGuestToken}/conclusions`, { body: { kind: "FIELD_NOT_CONTRADICTED", field: "gstin" } });
+    const guestNameBefore = await request("POST", `/api/public/verify/${firewallGuestToken}/conclusions`, { body: { kind: "FIELD_NOT_CONTRADICTED", field: "legalBusinessName" } });
+    const currentFirewallPassport = await request("GET", "/api/passport/me", { token: msmeToken });
+    const firewallPassport = currentFirewallPassport.data.passport;
+    const firewallSnapshot = JSON.parse(JSON.stringify(firewallPassport.snapshotJson));
+    const firewallDb = new DatabaseSync(path.join(smokeDbDir, "smoke.db"));
+    firewallSnapshot.contradictions.push(
+      { field: "pan", severity: "HIGH", reason: "synthetic hidden PAN conflict", claimedValue: "HIDDEN", evidenceValues: ["HIDDEN"] },
+      { field: "businessName", severity: "HIGH", reason: "synthetic hidden account-name conflict", claimedValue: "HIDDEN", evidenceValues: ["HIDDEN"] }
+    );
+    firewallDb.prepare('UPDATE "Passport" SET "snapshotJson" = ? WHERE "id" = ?').run(JSON.stringify(firewallSnapshot), firewallPassport.id);
+    firewallDb.close();
+    const registeredGstinAfterHidden = await request("POST", `/api/trust-view/${consentId}/conclusions`, { token: buyerToken, body: { kind: "FIELD_NOT_CONTRADICTED", field: "gstin" } });
+    const registeredNameAfterHidden = await request("POST", `/api/trust-view/${consentId}/conclusions`, { token: buyerToken, body: { kind: "FIELD_NOT_CONTRADICTED", field: "legalBusinessName" } });
+    const guestGstinAfterHidden = await request("POST", `/api/public/verify/${firewallGuestToken}/conclusions`, { body: { kind: "FIELD_NOT_CONTRADICTED", field: "gstin" } });
+    const guestNameAfterHidden = await request("POST", `/api/public/verify/${firewallGuestToken}/conclusions`, { body: { kind: "FIELD_NOT_CONTRADICTED", field: "legalBusinessName" } });
+    for (const [name, before, after] of [
+      ["registered GSTIN", registeredConclusion, registeredGstinAfterHidden],
+      ["registered legal name", registeredNameBefore, registeredNameAfterHidden],
+      ["guest GSTIN", guestGstinBefore, guestGstinAfterHidden],
+      ["guest legal name", guestNameBefore, guestNameAfterHidden]
+    ] as const) {
+      assert(before.data.conclusion.result === "CONFIRMED" && after.data.conclusion.result === "CONFIRMED", `${name} changed because of hidden contradiction`);
+    }
+    const firewallAudit = await request("GET", "/api/audit-logs", { token: msmeToken });
+    assert(getActions(firewallAudit.data).includes("CONCLUSION_EVALUATED"), "conclusion audit event missing");
+    assert(!JSON.stringify(firewallAudit.data).includes("synthetic hidden") && !JSON.stringify(firewallAudit.data).includes("HIDDEN"), "conclusion audit leaked hidden contradiction details");
+    pass("U1. registered and guest paired twins remain stable when hidden PAN/account-name contradictions are added");
+    const auditDb = new DatabaseSync(path.join(smokeDbDir, "smoke.db"));
+    auditDb.prepare('CREATE TRIGGER fail_conclusion_audit AFTER INSERT ON "AuditLog" WHEN NEW.action = \'CONCLUSION_EVALUATED\' BEGIN SELECT RAISE(ABORT, \'synthetic audit failure\'); END;').run();
+    auditDb.close();
+    const auditFailure = await request("POST", `/api/trust-view/${consentId}/conclusions`, { token: buyerToken, body: { kind: "FIELD_NOT_CONTRADICTED", field: "gstin" }, expected: [503] });
+    assert(auditFailure.data.error.code === "FIREWALL_UNAVAILABLE", "audit failure did not fail closed");
+    const dropAuditDb = new DatabaseSync(path.join(smokeDbDir, "smoke.db"));
+    dropAuditDb.prepare("DROP TRIGGER fail_conclusion_audit").run();
+    dropAuditDb.close();
+    pass("U1b. conclusion audit failure returns FIREWALL_UNAVAILABLE without a successful disclosure");
     const malformedConclusion = await request("POST", `/api/trust-view/${consentId}/conclusions`, {
       token: buyerToken,
       body: { kind: "FIELD_SUPPORTED_BY_EVIDENCE", field: "gstin", extra: "ignored-must-not-be-accepted" },
       expected: [400]
     });
     assert(malformedConclusion.data.error.code === "VALIDATION_ERROR", "malformed Firewall request was not rejected");
+    const malformedJsonResponse = await fetch(`${baseUrl}/api/trust-view/${consentId}/conclusions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${buyerToken}`, "Content-Type": "application/json" },
+      body: "{bad-json"
+    });
+    const malformedJson = await malformedJsonResponse.json() as Json;
+    assert(malformedJsonResponse.status === 400 && malformedJson.error.code === "VALIDATION_ERROR" && !JSON.stringify(malformedJson).includes("bad-json"), "malformed JSON did not use the safe 400 shape");
+    const oversizedResponse = await fetch(`${baseUrl}/api/trust-view/${consentId}/conclusions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${buyerToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "FIELD_NOT_CONTRADICTED", field: "gstin", padding: "x".repeat(1_100_000) })
+    });
+    const oversized = await oversizedResponse.json() as Json;
+    assert(oversizedResponse.status === 413 && oversized.error.code === "PAYLOAD_TOO_LARGE", "oversized JSON did not use the safe 413 shape");
     pass("U2. registered Firewall conclusions are coarse, pinned and strict about request shape");
 
     const otherBuyer = await request("POST", "/api/auth/register", {
@@ -736,6 +793,9 @@ async function main() {
       body: { kind: "FIELD_NOT_CONTRADICTED", field: "gstin" }
     });
     assert(deniedGuestConclusion.data.conclusion.result === "NOT_DISCLOSABLE", "unknown guest conclusion was not uniformly denied");
+    const unmatched = await fetch(`${baseUrl}/api/public/verify/${"A".repeat(43)}/unmatched-route?token=synthetic-secret`);
+    const unmatchedBody = await unmatched.text();
+    assert(unmatched.status === 404 && unmatchedBody === JSON.stringify({ error: { code: "NOT_FOUND", message: "Not found." } }), "unmatched route did not use the generic 404 response");
     const grants = await request("GET", "/api/access-grants", { token: msmeToken });
     assert(grants.data.grants.some((item: Json) => item.id === guestGrant.data.grant.id && item.lastAccessedAt), "active access last accessed missing");
     const revokedGrant = await request("PATCH", `/api/access-grants/${guestGrant.data.grant.id}/revoke`, { token: msmeToken });
@@ -757,6 +817,30 @@ async function main() {
     await new Promise((resolve) => setTimeout(resolve, 1800));
     await expectBlocked("GET", `/api/public/verify/${expiringToken}`, undefined, ["ACCESS_EXPIRED"], "expired guest token");
     pass("AC. guest expiry is enforced by the backend rather than a frontend timer");
+
+    const validGuestRateStatuses: number[] = [];
+    for (let index = 0; index < 65; index += 1) {
+      const response = await fetch(`${baseUrl}/api/public/verify/${expiringToken}/conclusions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "FIELD_NOT_CONTRADICTED", field: "gstin" })
+      });
+      validGuestRateStatuses.push(response.status);
+      await response.arrayBuffer();
+    }
+    assert(validGuestRateStatuses.includes(429), "valid guest token was not bounded by the per-token limiter");
+    const rotatingGuestRateStatuses: number[] = [];
+    for (let index = 0; index < 200; index += 1) {
+      const response = await fetch(`${baseUrl}/api/public/verify/rotating-synthetic-token-${index}/conclusions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "FIELD_NOT_CONTRADICTED", field: "gstin" })
+      });
+      rotatingGuestRateStatuses.push(response.status);
+      await response.arrayBuffer();
+    }
+    assert(rotatingGuestRateStatuses.includes(429), "rotating guest tokens bypassed the independent IP limiter");
+    pass("AD. valid-token and rotating-token guest abuse are independently rate limited");
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   } finally {

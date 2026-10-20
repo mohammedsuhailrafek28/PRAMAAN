@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { prisma } from "../../config/prisma.js";
 import { ApiError } from "../../utils/apiError.js";
 import { disclosureItem } from "../../utils/disclosureCatalogue.js";
+import { writeAuditLog } from "../audit/audit.service.js";
+import { AuditAction } from "@prisma/client";
 import { evaluateConclusion } from "./evidence-firewall.js";
 import { FIREWALL_LIMITATION } from "./firewall-policy.js";
 import type { AuthorizationContext, ConclusionRequest, FirewallDecision } from "./firewall.types.js";
@@ -81,7 +83,7 @@ function toPublicDecision(result: FirewallDecision): PublicConclusion {
 
 const deny = (): PublicConclusion => ({ conclusion: { result: "NOT_DISCLOSABLE", basis: "AUTHORIZATION", passportVersion: null, scopeLimited: true, limitations: [FIREWALL_LIMITATION] } });
 
-async function consentContext(tx: any, actorId: string, consentRequestId: string, now: string, request: ConclusionRequest): Promise<{ input: any } | null> {
+async function consentContext(tx: any, actorId: string, consentRequestId: string, now: string, request: ConclusionRequest): Promise<{ input: any; audit: { businessId: string; actorId: string; consentRequestId: string } } | null> {
   const consent = await tx.consentRequest.findUnique({
     where: { id: consentRequestId },
     include: {
@@ -103,10 +105,13 @@ async function consentContext(tx: any, actorId: string, consentRequestId: string
     approvedEvidenceTypes: approved.evidenceTypes,
     requester: assuranceContext(consent.requester.requesterAssurance)
   };
-  return { input: { snapshot: consent.approvedPassport.snapshotJson, snapshotPassportId: consent.approvedPassport.id, authorization, request, now } };
+  return {
+    input: { snapshot: consent.approvedPassport.snapshotJson, snapshotPassportId: consent.approvedPassport.id, authorization, request, now },
+    audit: { businessId: consent.businessId, actorId, consentRequestId }
+  };
 }
 
-async function guestContext(tx: any, token: string, now: string, request: ConclusionRequest): Promise<{ input: any } | null> {
+async function guestContext(tx: any, token: string, now: string, request: ConclusionRequest): Promise<{ input: any; audit: { businessId: string; actorId: string; accessGrantId: string } } | null> {
   if (!/^[A-Za-z0-9_-]{40,}$/.test(token)) return null;
   const tokenHash = createHash("sha256").update(token).digest("hex");
   const grant = await tx.accessGrant.findUnique({
@@ -130,14 +135,32 @@ async function guestContext(tx: any, token: string, now: string, request: Conclu
     approvedEvidenceTypes: scope.evidenceTypes,
     requester
   };
-  return { input: { snapshot: grant.passport.snapshotJson, snapshotPassportId: grant.passport.id, authorization, request, now } };
+  return {
+    input: { snapshot: grant.passport.snapshotJson, snapshotPassportId: grant.passport.id, authorization, request, now },
+    // Unregistered guests have no user actor; the grant owner is the bounded
+    // audit actor and the accessGrantId identifies the guest credential scope.
+    audit: { businessId: grant.businessId, actorId: grant.createdByUserId, accessGrantId: grant.id }
+  };
 }
 
-async function evaluate(loader: (tx: any, now: string, request: ConclusionRequest) => Promise<{ input: any } | null>, request: ConclusionRequest) {
+async function evaluate(loader: (tx: any, now: string, request: ConclusionRequest) => Promise<{ input: any; audit: { businessId: string; actorId: string; consentRequestId?: string; accessGrantId?: string } } | null>, request: ConclusionRequest) {
   const now = new Date().toISOString();
   try {
-    const loaded = await prisma.$transaction(async (tx) => loader(tx, now, request));
-    return loaded ? toPublicDecision(evaluateConclusion(loaded.input)) : deny();
+    return await prisma.$transaction(async (tx) => {
+      const loaded = await loader(tx, now, request);
+      if (!loaded) return deny();
+      const decision = evaluateConclusion(loaded.input);
+      await writeAuditLog({
+        businessId: loaded.audit.businessId,
+        actorId: loaded.audit.actorId,
+        consentRequestId: loaded.audit.consentRequestId,
+        accessGrantId: loaded.audit.accessGrantId,
+        action: AuditAction.CONCLUSION_EVALUATED,
+        metadata: { channel: loaded.input.authorization.channel, queryKind: request.kind, evaluatedAt: now },
+        client: tx
+      });
+      return toPublicDecision(decision);
+    });
   } catch {
     throw new ApiError(503, "FIREWALL_UNAVAILABLE", "Trust conclusion is temporarily unavailable.");
   }
