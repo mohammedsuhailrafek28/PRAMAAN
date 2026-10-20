@@ -17,6 +17,7 @@
     "test:evidence-revisions": "tsx scripts/evidence-revision-integrity-tests.ts",
     "test:atomic-reports": "tsx scripts/atomic-report-generation-tests.ts",
     "test:onboarding": "tsx scripts/onboarding-pack-tests.ts",
+    "test:evidence-requests": "tsx scripts/evidence-request-tests.ts",
     "demo:reset": "tsx scripts/demo-reset.ts",
     "browser:install": "playwright install chromium",
     "db:init": "tsx prisma/init-sqlite.ts",

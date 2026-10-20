@@ -252,6 +252,22 @@ export interface OnboardingAssignment {
   checklist: OnboardingChecklistItem[];
 }
 
+export type EvidenceRequestStatus = "OPEN" | "RESPONDED" | "RESOLVED" | "INSUFFICIENT" | "ACTION_REQUIRED";
+export interface EvidenceRequest {
+  id: string;
+  assignmentId: string;
+  requirement: { key: string; label: string };
+  requestKind: "MISSING_EVIDENCE" | "CLARIFICATION" | string;
+  reason: string;
+  status: EvidenceRequestStatus | string;
+  createdAt: string;
+  updatedAt: string;
+  business: { id: string; legalName?: string | null; gstin?: string | null };
+  requester: { id: string; organizationName?: string; role: string; identity?: RequesterIdentity };
+  responses: { id: string; responseType: string; createdAt: string; clarification?: string | null; documentReferenced?: boolean; documentType?: string }[];
+  history: { action: string; fromStatus?: string | null; toStatus: string; createdAt: string }[];
+}
+
 
 export interface AccessGrant {
   id: string;

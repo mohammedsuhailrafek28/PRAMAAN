@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRight, CheckCircle2, ClipboardList, FileUp, Loader2, XCircle } from "lucide-react";
+import { ArrowRight, CheckCircle2, ClipboardList, FileUp, Loader2, MessageSquare, XCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -11,94 +11,34 @@ import { useToast } from "@/components/ui/use-toast";
 import { getApiError } from "@/services/api";
 import * as api from "@/services/api";
 import { captureSession, isStaleSession } from "@/services/sessionEpoch";
-import type { OnboardingAssignment, OnboardingPack, Role } from "@/types";
+import type { BusinessDocument, EvidenceRequest, OnboardingAssignment, OnboardingPack, Role } from "@/types";
 import { cn } from "@/lib/utils";
 import { effectiveAssurance } from "@/lib/requesterIdentity";
 
-function statusLabel(status: OnboardingAssignment["status"]) {
-  return status.replace(/_/g, " ").toLowerCase().replace(/^./, (value: string) => value.toUpperCase());
+function statusLabel(status: string) { return status.replace(/_/g, " ").toLowerCase().replace(/^./, (value) => value.toUpperCase()); }
+
+function RequestCase({ request, owner, documents, onChange }: { request: EvidenceRequest; owner: boolean; documents: BusinessDocument[]; onChange: () => void }) {
+  const { toast } = useToast(); const [busy, setBusy] = useState(false); const [clarification, setClarification] = useState(""); const [shareAcknowledged, setShareAcknowledged] = useState(false); const [file, setFile] = useState<File | null>(null); const [existingDocumentId, setExistingDocumentId] = useState("");
+  const documentType = request.requirement.key.includes("gst") ? "gst_certificate" : request.requirement.key.includes("udyam") ? "udyam_certificate" : "bank_statement";
+  const matchingDocuments = documents.filter((document) => document.type === documentType && document.isCurrent !== false);
+  async function respond(type: "DOCUMENT_REFERENCE" | "CLARIFICATION") { setBusy(true); try { let documentId: string | undefined; if (type === "DOCUMENT_REFERENCE") { if (existingDocumentId) documentId = existingDocumentId; else { if (!file) throw new Error("Choose an existing document or replacement evidence file first."); const uploaded = await api.uploadBusinessDocument(documentType, file); documentId = uploaded.documentId; } } await api.respondToEvidenceRequest(request.id, { responseType: type, documentId, clarification: type === "CLARIFICATION" ? clarification : undefined }); setFile(null); setExistingDocumentId(""); setClarification(""); setShareAcknowledged(false); toast({ title: "Response sent", description: "The requester can review this case without receiving the document itself.", variant: "success" }); onChange(); } catch (error) { if (!isStaleSession(error)) toast({ title: "Could not respond", description: error instanceof Error ? error.message : getApiError(error), variant: "destructive" }); } finally { setBusy(false); } }
+  async function review(decision: "RESOLVED" | "INSUFFICIENT" | "ACTION_REQUIRED") { setBusy(true); try { await api.reviewEvidenceRequest(request.id, decision); toast({ title: `Case ${statusLabel(decision).toLowerCase()}`, variant: decision === "RESOLVED" ? "success" : "warning" }); onChange(); } catch (error) { if (!isStaleSession(error)) toast({ title: "Could not update case", description: getApiError(error), variant: "destructive" }); } finally { setBusy(false); } }
+  const active = request.status === "OPEN" || request.status === "ACTION_REQUIRED";
+  return <Card className="p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-medium uppercase tracking-wide text-slate-500">{request.requestKind.replace(/_/g, " ")}</p><h3 className="mt-1 text-lg font-semibold text-slate-900">{request.requirement.label}</h3><p className="mt-1 text-sm text-slate-600">{request.reason}</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{statusLabel(request.status)}</span></div><div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">{owner ? `Clarification text is shared with ${request.requester.organizationName || "the requesting institution"}. Do not include PAN, full bank account numbers, passwords, credentials, or raw document contents. Documents remain inside your evidence vault and consent is separate.` : "This case tracks collection follow-up only. It does not grant Trust Profile or document access."}</div>{request.responses.length > 0 && <div className="mt-4 space-y-2" aria-label="Case history"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Latest response</p><p className="text-sm text-slate-700">{request.responses[request.responses.length - 1].responseType === "CLARIFICATION" ? request.responses[request.responses.length - 1].clarification : "Evidence was referenced by the MSME."}</p></div>}{owner && active && <div className="mt-4 grid gap-3 sm:grid-cols-2"><div><Label htmlFor={`case-existing-${request.id}`}>Existing document</Label><select id={`case-existing-${request.id}`} value={existingDocumentId} onChange={(event) => setExistingDocumentId(event.target.value)} className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"><option value="">Choose an existing {request.requirement.label.toLowerCase()}</option>{matchingDocuments.map((document) => <option key={document.id} value={document.id}>{document.fileName ?? document.id} · revision {document.revision ?? 1}</option>)}</select></div><div><Label htmlFor={`case-file-${request.id}`}>Replacement evidence</Label><Input id={`case-file-${request.id}`} type="file" accept="application/pdf,image/*" className="mt-1" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /><p className="mt-1 text-xs text-slate-500">Uploaded through the existing MSME evidence pipeline.</p></div><Button className="sm:col-span-2" onClick={() => void respond("DOCUMENT_REFERENCE")} disabled={busy || (!file && !existingDocumentId)}><FileUp className="h-4 w-4" />Respond with evidence</Button></div>}{owner && active && <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end"><div><Label htmlFor={`case-note-${request.id}`}>Clarification</Label><Input id={`case-note-${request.id}`} value={clarification} onChange={(event) => setClarification(event.target.value)} placeholder="Add a concise clarification" className="mt-1" /><label htmlFor={`case-share-${request.id}`} className="mt-2 flex items-start gap-2 text-xs text-slate-600"><input id={`case-share-${request.id}`} type="checkbox" checked={shareAcknowledged} onChange={(event) => setShareAcknowledged(event.target.checked)} className="mt-0.5 h-4 w-4" />I understand this clarification will be shared with the requesting institution.</label></div><Button variant="outline" onClick={() => void respond("CLARIFICATION")} disabled={busy || clarification.trim().length < 5 || !shareAcknowledged}><MessageSquare className="h-4 w-4" />Send clarification</Button></div>}{!owner && request.status === "RESPONDED" && <div className="mt-4 flex flex-wrap gap-2"><Button onClick={() => void review("RESOLVED")} disabled={busy}><CheckCircle2 className="h-4 w-4" />Resolve</Button><Button variant="outline" onClick={() => void review("ACTION_REQUIRED")} disabled={busy}><MessageSquare className="h-4 w-4" />Request another action</Button><Button variant="outline" onClick={() => void review("INSUFFICIENT")} disabled={busy}><XCircle className="h-4 w-4" />Still insufficient</Button></div>}</Card>;
 }
 
-function AssignmentCard({ assignment, owner, onChange }: { assignment: OnboardingAssignment; owner: boolean; onChange: () => void }) {
-  const { toast } = useToast();
-  const [busy, setBusy] = useState(false);
-  async function act(action: "accept" | "decline" | "cancel") {
-    setBusy(true);
-    try {
-      if (action === "accept") await api.acceptOnboardingAssignment(assignment.id);
-      if (action === "decline") await api.declineOnboardingAssignment(assignment.id);
-      if (action === "cancel") await api.cancelOnboardingAssignment(assignment.id);
-      toast({ title: action === "accept" ? "Checklist accepted" : action === "decline" ? "Request declined" : "Request cancelled", variant: action === "decline" || action === "cancel" ? "warning" : "success" });
-      onChange();
-    } catch (error) {
-      if (!isStaleSession(error)) toast({ title: "Action failed", description: getApiError(error), variant: "destructive" });
-    } finally { setBusy(false); }
-  }
+function AssignmentCard({ assignment, owner, onChange, onRequest }: { assignment: OnboardingAssignment; owner: boolean; onChange: () => void; onRequest: (assignment: OnboardingAssignment, requirementKey: string, kind: "MISSING_EVIDENCE" | "CLARIFICATION") => void }) {
+  const { toast } = useToast(); const [busy, setBusy] = useState(false);
+  async function act(action: "accept" | "decline" | "cancel") { setBusy(true); try { if (action === "accept") await api.acceptOnboardingAssignment(assignment.id); if (action === "decline") await api.declineOnboardingAssignment(assignment.id); if (action === "cancel") await api.cancelOnboardingAssignment(assignment.id); toast({ title: action === "accept" ? "Checklist accepted" : action === "decline" ? "Request declined" : "Request cancelled", variant: action === "accept" ? "success" : "warning" }); onChange(); } catch (error) { if (!isStaleSession(error)) toast({ title: "Action failed", description: getApiError(error), variant: "destructive" }); } finally { setBusy(false); } }
   const done = assignment.checklist.filter((item) => item.status === "RECEIVED" || item.status === "SUBMITTED").length;
-  return (
-    <Card className="p-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{assignment.pack.key} · v{assignment.pack.version}</p>
-          <h2 className="mt-1 text-lg font-semibold text-slate-900">{owner ? assignment.requester.organizationName : assignment.business.legalName}</h2>
-          <p className="mt-1 text-sm text-slate-600">{owner ? `${assignment.requester.role} requester · ${effectiveAssurance(assignment.requester.identity).level}` : `GSTIN ${assignment.business.gstin}`}</p>
-        </div>
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{statusLabel(assignment.status)}</span>
-      </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        {assignment.checklist.map((item) => {
-          const satisfied = item.status === "RECEIVED" || item.status === "SUBMITTED";
-          return <div key={item.key} className="rounded-md border border-slate-200 p-3" aria-label={`${item.label}: ${item.status}`}>
-            <div className="flex items-start gap-2"><span className={cn("mt-0.5", satisfied ? "text-emerald-600" : "text-amber-600")} aria-hidden>{satisfied ? <CheckCircle2 className="h-4 w-4" /> : <ClipboardList className="h-4 w-4" />}</span><div><p className="text-sm font-medium text-slate-900">{item.label}{!item.required && <span className="ml-1 text-xs font-normal text-slate-500">Optional</span>}</p><p className="mt-1 text-xs text-slate-500">{owner ? item.status.replace(/_/g, " ") : satisfied ? "Received" : "Outstanding"}</p></div></div>
-          </div>;
-        })}
-      </div>
-      <p className="mt-4 text-sm text-slate-600">{done} of {assignment.checklist.length} checklist items received. This workflow never grants Trust Profile access.</p>
-      {owner && <p className="mt-2 text-sm text-slate-600">Requester assurance: <strong>{effectiveAssurance(assignment.requester.identity).level}</strong>. Review access separately through Consent & Access.</p>}
-      <div className="mt-4 flex flex-wrap gap-2">
-        {owner && assignment.status === "REQUESTED" && <><Button onClick={() => void act("accept")} disabled={busy}><CheckCircle2 className="h-4 w-4" />Accept</Button><Button variant="outline" onClick={() => void act("decline")} disabled={busy}><XCircle className="h-4 w-4" />Decline</Button></>}
-        {!owner && ["REQUESTED", "ACCEPTED"].includes(assignment.status) && <Button variant="outline" onClick={() => void act("cancel")} disabled={busy}><XCircle className="h-4 w-4" />Cancel request</Button>}
-        {owner && <Button asChild variant="outline"><Link to="/msme/evidence-vault"><FileUp className="h-4 w-4" />Open evidence vault<ArrowRight className="h-4 w-4" /></Link></Button>}
-      </div>
-    </Card>
-  );
+  return <Card className="p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-medium uppercase tracking-wide text-slate-500">{assignment.pack.key} · v{assignment.pack.version}</p><h2 className="mt-1 text-lg font-semibold text-slate-900">{owner ? assignment.requester.organizationName : assignment.business.legalName}</h2><p className="mt-1 text-sm text-slate-600">{owner ? `${assignment.requester.role} requester · ${effectiveAssurance(assignment.requester.identity).level}` : `GSTIN ${assignment.business.gstin}`}</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{statusLabel(assignment.status)}</span></div><div className="mt-4 grid gap-3 sm:grid-cols-3">{assignment.checklist.map((item) => { const satisfied = item.status === "RECEIVED" || item.status === "SUBMITTED"; return <div key={item.key} className="rounded-md border border-slate-200 p-3" aria-label={`${item.label}: ${item.status}`}><div className="flex items-start gap-2"><span className={cn("mt-0.5", satisfied ? "text-emerald-600" : "text-amber-600")} aria-hidden>{satisfied ? <CheckCircle2 className="h-4 w-4" /> : <ClipboardList className="h-4 w-4" />}</span><div><p className="text-sm font-medium text-slate-900">{item.label}{!item.required && <span className="ml-1 text-xs font-normal text-slate-500">Optional</span>}</p><p className="mt-1 text-xs text-slate-500">{owner ? item.status.replace(/_/g, " ") : satisfied ? "Received" : "Outstanding"}</p></div></div>{!owner && assignment.status === "ACCEPTED" && <div className="mt-2 flex flex-wrap gap-1"><Button variant="ghost" size="sm" onClick={() => onRequest(assignment, item.key, "MISSING_EVIDENCE")}>Request evidence</Button><Button variant="ghost" size="sm" onClick={() => onRequest(assignment, item.key, "CLARIFICATION")}>Ask clarification</Button></div>}</div>; })}</div><p className="mt-4 text-sm text-slate-600">{done} of {assignment.checklist.length} checklist items received. This workflow never grants Trust Profile access.</p><div className="mt-4 flex flex-wrap gap-2">{owner && assignment.status === "REQUESTED" && <><Button onClick={() => void act("accept")} disabled={busy}><CheckCircle2 className="h-4 w-4" />Accept</Button><Button variant="outline" onClick={() => void act("decline")} disabled={busy}><XCircle className="h-4 w-4" />Decline</Button></>}{!owner && ["REQUESTED", "ACCEPTED"].includes(assignment.status) && <Button variant="outline" onClick={() => void act("cancel")} disabled={busy}><XCircle className="h-4 w-4" />Cancel request</Button>}{owner && <Button asChild variant="outline"><Link to="/msme/evidence-vault"><FileUp className="h-4 w-4" />Open evidence vault<ArrowRight className="h-4 w-4" /></Link></Button>}</div></Card>;
 }
 
 export function OnboardingPacksPage({ role }: { role: Role }) {
-  const owner = role === "msme";
-  const { toast } = useToast();
-  const [packs, setPacks] = useState<OnboardingPack[]>([]);
-  const [assignments, setAssignments] = useState<OnboardingAssignment[]>([]);
-  const [gstin, setGstin] = useState("");
-  const [purpose, setPurpose] = useState("Vendor onboarding");
-  const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    const session = captureSession();
-    try {
-      const result = owner ? await session.run(api.getIncomingOnboardingAssignments()) : await session.run(api.getOutgoingOnboardingAssignments());
-      setAssignments(result);
-      if (!owner) setPacks(await session.run(api.getOnboardingPacks()));
-    } catch (error) { if (!isStaleSession(error)) toast({ title: "Onboarding workspace unavailable", description: getApiError(error), variant: "destructive" }); }
-    finally { setLoading(false); }
-  }, [owner, toast]);
-
+  const owner = role === "msme"; const { toast } = useToast(); const [packs, setPacks] = useState<OnboardingPack[]>([]); const [assignments, setAssignments] = useState<OnboardingAssignment[]>([]); const [cases, setCases] = useState<EvidenceRequest[]>([]); const [documents, setDocuments] = useState<BusinessDocument[]>([]); const [gstin, setGstin] = useState(""); const [purpose, setPurpose] = useState("Vendor onboarding"); const [loading, setLoading] = useState(true); const [sending, setSending] = useState(false);
+  const load = useCallback(async () => { setLoading(true); const session = captureSession(); try { const assignmentResult = owner ? await session.run(api.getIncomingOnboardingAssignments()) : await session.run(api.getOutgoingOnboardingAssignments()); setAssignments(assignmentResult); setCases(await session.run(owner ? api.getIncomingEvidenceRequests() : api.getOutgoingEvidenceRequests())); if (owner) setDocuments((await session.run(api.getBusiness())).documents); else setPacks(await session.run(api.getOnboardingPacks())); } catch (error) { if (!isStaleSession(error)) toast({ title: "Onboarding workspace unavailable", description: getApiError(error), variant: "destructive" }); } finally { setLoading(false); } }, [owner, toast]);
   useEffect(() => { void load(); }, [load]);
-
-  async function send() {
-    const pack = packs[0];
-    if (!pack || !gstin.trim()) return;
-    setSending(true);
-    try { await api.createOnboardingAssignment({ businessGstin: gstin, packKey: pack.key, packVersion: pack.version, purpose }); setGstin(""); toast({ title: "Checklist sent", description: "The MSME will decide whether to accept it.", variant: "success" }); await load(); }
-    catch (error) { if (!isStaleSession(error)) toast({ title: "Could not send checklist", description: getApiError(error), variant: "destructive" }); }
-    finally { setSending(false); }
-  }
-
-  return <div className="space-y-6">
-    <PageHeader eyebrow={owner ? "Collection" : role === "bank" ? "Lender workspace" : "Buyer workspace"} title="Onboarding packs" description={owner ? "Review institution checklists and decide what your business is ready to collect. Nothing is shared automatically." : "Request a defined document checklist from an MSME. Consent remains separate."} />
-    {!owner && packs[0] && <Card className="p-5"><div className="flex items-start gap-3"><div className="rounded-lg bg-primary-50 p-2 text-primary"><ClipboardList className="h-5 w-5" /></div><div><h2 className="font-semibold text-slate-900">{packs[0].name} · v{packs[0].version}</h2><p className="mt-1 text-sm text-slate-600">{packs[0].description}</p><p className="mt-2 text-xs text-slate-500">Required: GST certificate and Udyam certificate · Optional: bank statement</p></div></div><div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"><div><Label htmlFor="onboarding-gstin">MSME GSTIN</Label><Input id="onboarding-gstin" value={gstin} onChange={(event) => setGstin(event.target.value.toUpperCase())} placeholder="33ABCDE1234F1Z5" className="mt-1 font-mono uppercase" /></div><div><Label htmlFor="onboarding-purpose">Purpose</Label><Input id="onboarding-purpose" value={purpose} onChange={(event) => setPurpose(event.target.value)} className="mt-1" /></div><Button onClick={() => void send()} disabled={sending || !gstin.trim()}>{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}Send pack</Button></div></Card>}
-    {loading && assignments.length === 0 ? <div role="status" className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-600">Loading onboarding requests…</div> : assignments.length === 0 ? <EmptyState icon={ClipboardList} title="No onboarding requests" description={owner ? "Requests from buyers and banks will appear here." : "Requests you send will appear here with their checklist progress."} /> : <div className="space-y-4">{assignments.map((assignment) => <AssignmentCard key={assignment.id} assignment={assignment} owner={owner} onChange={() => void load()} />)}</div>}
-  </div>;
+  async function send() { const pack = packs[0]; if (!pack || !gstin.trim()) return; setSending(true); try { await api.createOnboardingAssignment({ businessGstin: gstin, packKey: pack.key, packVersion: pack.version, purpose }); setGstin(""); toast({ title: "Checklist sent", description: "The MSME will decide whether to accept it.", variant: "success" }); await load(); } catch (error) { if (!isStaleSession(error)) toast({ title: "Could not send checklist", description: getApiError(error), variant: "destructive" }); } finally { setSending(false); } }
+  async function requestCase(assignment: OnboardingAssignment, requirementKey: string, kind: "MISSING_EVIDENCE" | "CLARIFICATION") { const reason = window.prompt(kind === "CLARIFICATION" ? "What needs clarification?" : "Why is evidence needed?"); if (!reason) return; try { await api.createEvidenceRequest(assignment.id, { requirementKey, requestKind: kind, reason }); toast({ title: "Follow-up requested", variant: "success" }); await load(); } catch (error) { toast({ title: "Could not request follow-up", description: getApiError(error), variant: "destructive" }); } }
+  return <div className="space-y-6"><PageHeader eyebrow={owner ? "Collection" : role === "bank" ? "Lender workspace" : "Buyer workspace"} title="Onboarding packs" description={owner ? "Review institution checklists and targeted evidence follow-ups. Nothing is shared automatically." : "Request a defined checklist and resolve evidence follow-ups. Consent remains separate."} />{!owner && packs[0] && <Card className="p-5"><div className="flex items-start gap-3"><div className="rounded-lg bg-primary-50 p-2 text-primary"><ClipboardList className="h-5 w-5" /></div><div><h2 className="font-semibold text-slate-900">{packs[0].name} · v{packs[0].version}</h2><p className="mt-1 text-sm text-slate-600">{packs[0].description}</p></div></div><div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"><div><Label htmlFor="onboarding-gstin">MSME GSTIN</Label><Input id="onboarding-gstin" value={gstin} onChange={(event) => setGstin(event.target.value.toUpperCase())} placeholder="33ABCDE1234F1Z5" className="mt-1 font-mono uppercase" /></div><div><Label htmlFor="onboarding-purpose">Purpose</Label><Input id="onboarding-purpose" value={purpose} onChange={(event) => setPurpose(event.target.value)} className="mt-1" /></div><Button onClick={() => void send()} disabled={sending || !gstin.trim()}>{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}Send pack</Button></div></Card>}{loading && assignments.length === 0 ? <div role="status" className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-600">Loading onboarding requests…</div> : assignments.length === 0 ? <EmptyState icon={ClipboardList} title="No onboarding requests" description={owner ? "Requests from buyers and banks will appear here." : "Requests you send will appear here with their checklist progress."} /> : <div className="space-y-4">{assignments.map((assignment) => <AssignmentCard key={assignment.id} assignment={assignment} owner={owner} onChange={() => void load()} onRequest={requestCase} />)}</div>}{cases.length > 0 && <section className="space-y-3"><div><p className="text-xs font-medium uppercase tracking-wide text-slate-500">Case workspace</p><h2 className="text-xl font-semibold text-slate-900">Evidence follow-ups</h2></div>{cases.map((request) => <RequestCase key={request.id} request={request} owner={owner} documents={documents} onChange={() => void load()} />)}</section>}</div>;
 }

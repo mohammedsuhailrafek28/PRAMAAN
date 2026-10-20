@@ -7,8 +7,10 @@ uploads/
 dev.db
 prisma/dev.db
 prisma/.tmp-migration-tests/
+prisma/.tmp-evidence-revisions/
 prisma/.tmp-smoke/
 .tmp-smoke-uploads/
+.tmp-evidence-revision-uploads/
 dev.db-journal
 .DS_Store
 *.log

@@ -5,7 +5,7 @@ import type {
   Notification, Role, TrustProfile, TrustViewResult, User, EvidenceStatus, TrustSummary,
   AccessGrant, GuestLinkFailure, GuestVerificationView, SharedEvidence,
   ReadinessEvaluation, ReadinessProfileSummary, ReportSummary, ReportType,
-  OnboardingAssignment, OnboardingPack,
+  OnboardingAssignment, OnboardingPack, EvidenceRequest,
 } from "@/types";
 import { formatSharedFields } from "@/lib/sharedFields";
 import { parseScope, type DisclosureScope } from "@/lib/disclosure";
@@ -13,7 +13,7 @@ import { identityFromPayload, parseRequesterIdentity } from "@/lib/requesterIden
 import { TOKEN_KEY, isSessionExpiry, notifyUnauthorized } from "@/services/session";
 
 const API_URL = (import.meta.env?.VITE_API_URL || "http://localhost:4000/api").replace(/\/$/, "");
-const client = axios.create({ baseURL: API_URL, timeout: 15000 });
+const client = axios.create({ baseURL: API_URL, timeout: 15000, headers: { "Cache-Control": "no-cache" } });
 
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem(TOKEN_KEY);
@@ -202,14 +202,15 @@ export async function saveBusinessProfile(input: { legalName: string; gstin: str
   return mapBusiness(data.business);
 }
 
-export async function uploadBusinessDocument(docType: BusinessDocument["type"], file: File, metadata: { issuedAt?: string; expiresAt?: string; source?: string } = {}): Promise<void> {
+export async function uploadBusinessDocument(docType: BusinessDocument["type"], file: File, metadata: { issuedAt?: string; expiresAt?: string; source?: string } = {}): Promise<{ documentId: string }> {
   const form = new FormData();
   form.append("docType", docType.toUpperCase());
   form.append("file", file);
   if (metadata.issuedAt) form.append("issuedAt", metadata.issuedAt);
   if (metadata.expiresAt) form.append("expiresAt", metadata.expiresAt);
   if (metadata.source) form.append("source", metadata.source);
-  await client.post("/business/documents", form);
+  const { data } = await client.post("/business/documents", form);
+  return { documentId: data.documentId };
 }
 
 /** Runs the internal cross-check and returns the engine's own result. Callers refresh the business themselves. */
@@ -291,6 +292,12 @@ export async function createOnboardingAssignment(input: { businessGstin: string;
 export async function acceptOnboardingAssignment(id: string): Promise<OnboardingAssignment> { const { data } = await client.patch(`/onboarding/assignments/${id}/accept`); return mapOnboardingAssignment(data.assignment); }
 export async function declineOnboardingAssignment(id: string): Promise<OnboardingAssignment> { const { data } = await client.patch(`/onboarding/assignments/${id}/decline`); return mapOnboardingAssignment(data.assignment); }
 export async function cancelOnboardingAssignment(id: string): Promise<OnboardingAssignment> { const { data } = await client.patch(`/onboarding/assignments/${id}/cancel`); return mapOnboardingAssignment(data.assignment); }
+function mapEvidenceRequest(raw: any): EvidenceRequest { return { ...raw, status: String(raw.status || "OPEN"), responses: Array.isArray(raw.responses) ? raw.responses : [], history: Array.isArray(raw.history) ? raw.history : [] }; }
+export async function getIncomingEvidenceRequests(): Promise<EvidenceRequest[]> { const { data } = await client.get("/onboarding/evidence-requests", { params: { scope: "incoming" } }); return data.requests.map(mapEvidenceRequest); }
+export async function getOutgoingEvidenceRequests(): Promise<EvidenceRequest[]> { const { data } = await client.get("/onboarding/evidence-requests", { params: { scope: "outgoing" } }); return data.requests.map(mapEvidenceRequest); }
+export async function createEvidenceRequest(assignmentId: string, input: { requirementKey: string; requestKind: "MISSING_EVIDENCE" | "CLARIFICATION"; reason: string }): Promise<EvidenceRequest> { const { data } = await client.post(`/onboarding/assignments/${assignmentId}/evidence-requests`, input); return mapEvidenceRequest(data.request); }
+export async function respondToEvidenceRequest(id: string, input: { responseType: "DOCUMENT_REFERENCE" | "CLARIFICATION"; documentId?: string; clarification?: string }): Promise<EvidenceRequest> { const { data } = await client.post(`/onboarding/evidence-requests/${id}/respond`, input); return mapEvidenceRequest(data.request); }
+export async function reviewEvidenceRequest(id: string, decision: "RESOLVED" | "INSUFFICIENT" | "ACTION_REQUIRED", note?: string): Promise<EvidenceRequest> { const { data } = await client.patch(`/onboarding/evidence-requests/${id}/review`, { decision, note }); return mapEvidenceRequest(data.request); }
 
 export async function createAccessGrant(input: { recipientName?: string; recipientOrganization?: string; recipientEmail?: string; purpose: string; scope: DisclosureScope; durationHours?: number; expiresAt?: string }): Promise<AccessGrant> {
   const { data } = await client.post("/access-grants", { ...input, scope: toApiScope(input.scope) });

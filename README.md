@@ -182,9 +182,18 @@ GET   /api/onboarding/assignments/:id
 PATCH /api/onboarding/assignments/:id/accept
 PATCH /api/onboarding/assignments/:id/decline
 PATCH /api/onboarding/assignments/:id/cancel
+GET   /api/onboarding/evidence-requests?scope=incoming|outgoing
+GET   /api/onboarding/evidence-requests/:id
+POST  /api/onboarding/assignments/:assignmentId/evidence-requests
+POST  /api/onboarding/evidence-requests/:id/respond
+PATCH /api/onboarding/evidence-requests/:id/review
 ```
 
 Pack versions are pinned into each assignment through `requirementsSnapshot`; publishing a later version cannot change an existing request. Requester assurance is rechecked for protected operations, and all assignment transitions are audited and notified transactionally with the assignment update.
+
+### Phase 1B evidence review cases
+
+Phase 1B adds targeted, requirement-level follow-up cases on top of an accepted Phase 1A assignment. A buyer or bank can request missing evidence or clarification; the owning MSME can reference a document through its existing upload/revision pipeline or send a clarification; the requester can resolve the case, mark it insufficient, or request another action. Cases have append-only response history and status events, with notifications and safe audit metadata. Case completion never grants consent, Trust View access, or authoritative government verification. Requesters see case progress only, while raw files and private evidence diagnostics remain owner-side.
 
 ### Phase 1A local demo
 
