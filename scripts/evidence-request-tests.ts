@@ -45,7 +45,14 @@ async function main() {
   await call("GET", `/api/onboarding/evidence-requests/${requestId}`, { token: other, expected: [403] }); assert(true, "other requester cannot read the case");
   await call("POST", `/api/onboarding/evidence-requests/${requestId}/respond`, { token: other, body: { responseType: "CLARIFICATION", clarification: "Spoofed response" }, expected: [403] }); assert(true, "other requester cannot respond as the MSME");
   await call("POST", `/api/onboarding/evidence-requests/${requestId}/respond`, { token: msme, body: { responseType: "DOCUMENT_REFERENCE", documentId: "not-owned-by-business" }, expected: [400] }); assert(true, "malformed or cross-business document references are rejected");
-  const response = await call("POST", `/api/onboarding/evidence-requests/${requestId}/respond`, { token: msme, body: { responseType: "CLARIFICATION", clarification: "The synthetic certificate is being prepared." } }); assert(response.data.request.status === "RESPONDED", "MSME can respond with a clarification");
+  const hostileClarification = "<script>steal(document.cookie)</script> PAN=ABCDE1234F account=000000000000 password=do-not-share";
+  const response = await call("POST", `/api/onboarding/evidence-requests/${requestId}/respond`, { token: msme, body: { responseType: "CLARIFICATION", clarification: hostileClarification } });
+  assert(response.data.request.status === "RESPONDED" && response.data.request.responses.at(-1).clarification === hostileClarification, "clarification is preserved as text without server-side HTML interpretation");
+  assert(!JSON.stringify(response.data.request).includes("filePath") && !JSON.stringify(response.data.request).includes("documentId"), "clarification response contains no document metadata");
+  const msmeNotifications = await call("GET", "/api/notifications", { token: msme });
+  assert(msmeNotifications.data.notifications.every((item: any) => !String(item.message).includes(hostileClarification)), "notifications do not duplicate clarification text");
+  const msmeAudit = await call("GET", "/api/audit-logs", { token: msme });
+  assert(!JSON.stringify(msmeAudit.data.logs).includes(hostileClarification), "audit metadata does not duplicate clarification text");
   const reviewed = await call("PATCH", `/api/onboarding/evidence-requests/${requestId}/review`, { token: buyer, body: { decision: "ACTION_REQUIRED" } }); assert(reviewed.data.request.status === "ACTION_REQUIRED", "reviewer can request another action");
   const second = await call("POST", `/api/onboarding/evidence-requests/${requestId}/respond`, { token: msme, body: { responseType: "CLARIFICATION", clarification: "The synthetic certificate remains available for consent review." } }); assert(second.data.request.status === "RESPONDED", "action-required case supports a re-response loop");
   const resolved = await call("PATCH", `/api/onboarding/evidence-requests/${requestId}/review`, { token: buyer, body: { decision: "RESOLVED" } }); assert(resolved.data.request.status === "RESOLVED", "reviewer can resolve a responded case");
