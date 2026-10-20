@@ -13,7 +13,7 @@ import { identityFromPayload, parseRequesterIdentity } from "@/lib/requesterIden
 import { TOKEN_KEY, isSessionExpiry, notifyUnauthorized } from "@/services/session";
 
 const API_URL = (import.meta.env?.VITE_API_URL || "http://localhost:4000/api").replace(/\/$/, "");
-const client = axios.create({ baseURL: API_URL, timeout: 15000 });
+const client = axios.create({ baseURL: API_URL, timeout: 15000, headers: { "Cache-Control": "no-cache" } });
 
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem(TOKEN_KEY);

@@ -32,6 +32,7 @@ async function main() {
   server.stdout.on("data", (chunk) => process.stdout.write(`[server] ${chunk}`)); server.stderr.on("data", (chunk) => process.stderr.write(`[server] ${chunk}`)); await waitForServer();
   const msme = await register(`case-msme-${id}@example.test`, "MSME", "Synthetic Textiles");
   const buyer = await register(`case-buyer-${id}@example.test`, "BUYER", "Synthetic Buyers");
+  const bank = await register(`case-bank-${id}@example.test`, "BANK", "Synthetic Bank");
   const other = await register(`case-other-${id}@example.test`, "BUYER", "Other Buyers");
   await call("POST", "/api/business", { token: msme, body: { legalName: "Synthetic Textiles", gstin: "33ABCDE1234F1Z5", udyamNumber: "UDYAM-TEST-0001", pan: "ABCDE1234F", address: "Synthetic Chennai", turnoverBand: "1Cr-5Cr" }, expected: [201] });
   const business = await call("GET", "/api/business/me", { token: msme }); const gstin = business.data.business.gstin as string;
@@ -52,6 +53,19 @@ async function main() {
   const incoming = await call("GET", "/api/onboarding/evidence-requests?scope=incoming", { token: msme }); assert(incoming.data.requests.some((item: any) => item.id === requestId), "MSME sees its targeted request history");
   const outgoing = await call("GET", "/api/onboarding/evidence-requests?scope=outgoing", { token: buyer }); assert(outgoing.data.requests.some((item: any) => item.status === "RESOLVED"), "requester sees the resolved case status");
   const notifications = await call("GET", "/api/notifications", { token: msme }); assert(notifications.data.notifications?.some((item: any) => item.message.includes("follow-up")), "MSME receives a follow-up notification");
+  const bankAssignment = await call("POST", "/api/onboarding/assignments", { token: bank, body: { businessGstin: gstin, packKey: "vendor-onboarding", packVersion: "1.0", purpose: "Synthetic bank review" }, expected: [201] });
+  const bankAssignmentId = bankAssignment.data.assignment.id as string;
+  await call("PATCH", `/api/onboarding/assignments/${bankAssignmentId}/accept`, { token: msme });
+  const bankRequest = await call("POST", `/api/onboarding/assignments/${bankAssignmentId}/evidence-requests`, { token: bank, body: { requirementKey: "GST_CERTIFICATE", requestKind: "CLARIFICATION", reason: "Please clarify the synthetic GST evidence." }, expected: [201] });
+  assert(bankRequest.data.request.requester.role === "BANK" && bankRequest.data.request.requester.identity.status === "UNVERIFIED" && bankRequest.data.request.status === "OPEN", "bank reviewers receive the same safe evidence-request contract");
+  await call("GET", `/api/onboarding/evidence-requests/${bankRequest.data.request.id}`, { token: msme });
+  await call("POST", `/api/onboarding/evidence-requests/${bankRequest.data.request.id}/respond`, { token: msme, body: { responseType: "CLARIFICATION", clarification: "Synthetic clarification for bank review." } });
+  const insufficient = await call("PATCH", `/api/onboarding/evidence-requests/${bankRequest.data.request.id}/review`, { token: bank, body: { decision: "INSUFFICIENT", note: "Synthetic evidence remains insufficient." } });
+  assert(insufficient.data.request.status === "INSUFFICIENT", "bank reviewers can mark a case insufficient without granting consent");
+  const bankMe = await call("GET", "/api/auth/me", { token: bank });
+  execSync(`npx tsx scripts/requester-assurance.ts suspend --user-id ${bankMe.data.user.id} --operator-id evidence-request-test-operator --suspension-reason synthetic-review-hold`, { cwd: root, env: environment(), stdio: "ignore" });
+  await call("GET", `/api/onboarding/evidence-requests/${bankRequest.data.request.id}`, { token: bank, expected: [403] }); assert(true, "suspended requester cannot access an existing evidence-request detail");
+  await call("POST", `/api/onboarding/assignments/${bankAssignmentId}/evidence-requests`, { token: bank, body: { requirementKey: "UDYAM_CERTIFICATE", requestKind: "MISSING_EVIDENCE", reason: "Synthetic request after suspension." }, expected: [403] }); assert(true, "suspended requester cannot create a new evidence request");
   console.log(`EVIDENCE REQUEST TESTS PASSED: ${passed}`);
 }
 
