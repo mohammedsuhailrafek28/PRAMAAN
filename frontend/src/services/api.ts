@@ -10,6 +10,7 @@ import type {
 import { formatSharedFields } from "@/lib/sharedFields";
 import { parseScope, type DisclosureScope } from "@/lib/disclosure";
 import { identityFromPayload, parseRequesterIdentity } from "@/lib/requesterIdentity";
+import type { CorrectableClaim, CorrectionSource, EvidenceReview } from "@/lib/evidenceReview";
 import { TOKEN_KEY, isSessionExpiry, notifyUnauthorized } from "@/services/session";
 
 const API_URL = (import.meta.env?.VITE_API_URL || "http://localhost:4000/api").replace(/\/$/, "");
@@ -341,4 +342,12 @@ export async function revokeReport(reportId: string): Promise<void> { await clie
 export async function getReportFile(reportId: string, kind: "preview" | "pdf"): Promise<Blob> {
   const { data } = await client.get(`/reports/${reportId}/${kind}`, { responseType: "blob", timeout: 60000 });
   return data;
+}
+
+// ---- Evidence review (owner-only; values are masked by the server) ----
+export async function getEvidenceReview(): Promise<EvidenceReview> { const { data } = await client.get("/evidence-intelligence/review", { timeout: 30000 }); return data.review; }
+/** The server re-derives the corrected value itself; the client only names which proposal it confirms. */
+export async function confirmEvidenceCorrection(input: { claim: CorrectableClaim; sourceDocumentId: string | null; source: CorrectionSource }): Promise<EvidenceReview> {
+  const { data } = await client.post("/evidence-intelligence/corrections", { ...input, confirm: true }, { timeout: 30000 });
+  return data.review;
 }

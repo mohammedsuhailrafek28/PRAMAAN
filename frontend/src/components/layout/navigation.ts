@@ -2,6 +2,7 @@ import {
   Archive,
   Building2,
   ClipboardCheck,
+  FileSearch,
   FileText,
   History,
   KeyRound,
@@ -19,6 +20,7 @@ export const ROUTES = {
   dashboard: "/msme/dashboard",
   businessProfile: "/msme/verification",
   evidence: "/msme/evidence-vault",
+  evidenceReview: "/msme/evidence-review",
   trustProfile: "/msme/trust-profile",
   consent: "/msme/consent",
   secureLinks: "/msme/consent?tab=links",
@@ -50,6 +52,7 @@ export const NAV_BY_ROLE: Record<Role, NavSection[]> = {
       items: [
         { to: ROUTES.businessProfile, label: "Business Profile", icon: Building2 },
         { to: ROUTES.evidence, label: "Evidence", icon: Archive },
+        { to: ROUTES.evidenceReview, label: "Evidence Review", icon: FileSearch },
         { to: ROUTES.trustProfile, label: "Trust Profile", icon: Layers },
       ],
     },
