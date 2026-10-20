@@ -1,12 +1,17 @@
 import { prisma } from "../../config/prisma.js";
 import { ApiError } from "../../utils/apiError.js";
 
+type NotificationClient = Pick<typeof prisma, "notification">;
+
 export async function createNotification(input: {
   userId: string;
   message: string;
   relatedConsentId?: string | null;
+  relatedOnboardingAssignmentId?: string | null;
+  client?: NotificationClient;
 }) {
-  return prisma.notification.create({ data: input });
+  const { client, ...data } = input;
+  return (client ?? prisma).notification.create({ data });
 }
 
 export async function list(userId: string) {

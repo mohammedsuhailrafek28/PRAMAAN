@@ -5,10 +5,11 @@ import type {
   Notification, Role, TrustProfile, TrustViewResult, User, EvidenceStatus, TrustSummary,
   AccessGrant, GuestLinkFailure, GuestVerificationView, SharedEvidence,
   ReadinessEvaluation, ReadinessProfileSummary, ReportSummary, ReportType,
+  OnboardingAssignment, OnboardingPack,
 } from "@/types";
 import { formatSharedFields } from "@/lib/sharedFields";
 import { parseScope, type DisclosureScope } from "@/lib/disclosure";
-import { identityFromPayload } from "@/lib/requesterIdentity";
+import { identityFromPayload, parseRequesterIdentity } from "@/lib/requesterIdentity";
 import { TOKEN_KEY, isSessionExpiry, notifyUnauthorized } from "@/services/session";
 
 const API_URL = (import.meta.env?.VITE_API_URL || "http://localhost:4000/api").replace(/\/$/, "");
@@ -280,6 +281,16 @@ export async function getAuditLogs(): Promise<AuditLogEntry[]> {
 }
 export async function getNotifications(): Promise<Notification[]> { const { data } = await client.get("/notifications"); return data.notifications.map((raw: any) => ({ id: raw.id, userId: raw.userId, message: raw.message, read: raw.readFlag, createdAt: raw.createdAt, relatedConsentId: raw.relatedConsentId })); }
 export async function markNotificationRead(id: string): Promise<void> { await client.patch(`/notifications/${id}/read`); }
+
+// Onboarding packs track collection progress only; they never grant Trust View access.
+export async function getOnboardingPacks(): Promise<OnboardingPack[]> { const { data } = await client.get("/onboarding/packs"); return data.packs; }
+function mapOnboardingAssignment(raw: any): OnboardingAssignment { return { ...raw, requester: { ...raw.requester, identity: parseRequesterIdentity(raw.requester?.identity, raw.requester?.organizationName) }, checklist: Array.isArray(raw.checklist) ? raw.checklist : [] }; }
+export async function getIncomingOnboardingAssignments(): Promise<OnboardingAssignment[]> { const { data } = await client.get("/onboarding/assignments", { params: { scope: "incoming" } }); return data.assignments.map(mapOnboardingAssignment); }
+export async function getOutgoingOnboardingAssignments(): Promise<OnboardingAssignment[]> { const { data } = await client.get("/onboarding/assignments", { params: { scope: "outgoing" } }); return data.assignments.map(mapOnboardingAssignment); }
+export async function createOnboardingAssignment(input: { businessGstin: string; packKey: string; packVersion: string; purpose: string }): Promise<OnboardingAssignment> { const { data } = await client.post("/onboarding/assignments", input); return mapOnboardingAssignment(data.assignment); }
+export async function acceptOnboardingAssignment(id: string): Promise<OnboardingAssignment> { const { data } = await client.patch(`/onboarding/assignments/${id}/accept`); return mapOnboardingAssignment(data.assignment); }
+export async function declineOnboardingAssignment(id: string): Promise<OnboardingAssignment> { const { data } = await client.patch(`/onboarding/assignments/${id}/decline`); return mapOnboardingAssignment(data.assignment); }
+export async function cancelOnboardingAssignment(id: string): Promise<OnboardingAssignment> { const { data } = await client.patch(`/onboarding/assignments/${id}/cancel`); return mapOnboardingAssignment(data.assignment); }
 
 export async function createAccessGrant(input: { recipientName?: string; recipientOrganization?: string; recipientEmail?: string; purpose: string; scope: DisclosureScope; durationHours?: number; expiresAt?: string }): Promise<AccessGrant> {
   const { data } = await client.post("/access-grants", { ...input, scope: toApiScope(input.scope) });

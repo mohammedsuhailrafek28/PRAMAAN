@@ -11,6 +11,7 @@ export async function writeAuditLog(input: {
   action: AuditAction;
   consentRequestId?: string | null;
   accessGrantId?: string | null;
+  onboardingAssignmentId?: string | null;
   metadata?: Prisma.InputJsonValue;
   dedupeWindowMs?: number;
   /** Pass a transaction client to make the audit row commit or roll back with the caller. */
@@ -38,6 +39,7 @@ export async function writeAuditLog(input: {
       action: input.action,
       consentRequestId: input.consentRequestId,
       accessGrantId: input.accessGrantId,
+      onboardingAssignmentId: input.onboardingAssignmentId,
       metadata: input.metadata
     }
   });

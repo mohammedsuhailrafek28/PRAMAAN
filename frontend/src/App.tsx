@@ -23,6 +23,7 @@ import { BuyerDashboard } from "@/pages/buyer/BuyerDashboard";
 import { BankDashboard } from "@/pages/bank/BankDashboard";
 import { DynamicTrustViewPage } from "@/pages/shared/DynamicTrustViewPage";
 import { ExternalVerificationPage } from "@/pages/shared/ExternalVerificationPage";
+import { OnboardingPacksPage } from "@/pages/shared/OnboardingPacksPage";
 import { useEffect } from "react";
 import { useAuthStore } from "@/store/authStore";
 
@@ -49,6 +50,7 @@ export default function App() {
               <Route path="/msme/consent-requests" element={<Navigate to="/msme/consent" replace />} />
               <Route path="/msme/audit-log" element={<AuditLogPage />} />
               <Route path="/msme/evidence-vault" element={<EvidenceVaultPage />} />
+              <Route path="/msme/onboarding" element={<OnboardingPacksPage role="msme" />} />
               <Route path="/msme/access" element={<Navigate to="/msme/consent?tab=links" replace />} />
               <Route path="/msme/settings" element={<SettingsPage />} />
             </Route>
@@ -59,6 +61,7 @@ export default function App() {
           <Route element={<ProtectedRoute allow={["buyer"]} />}>
             <Route element={<AppLayout />}>
               <Route path="/buyer/dashboard" element={<BuyerDashboard />} />
+              <Route path="/buyer/onboarding" element={<OnboardingPacksPage role="buyer" />} />
               <Route path="/buyer/settings" element={<SettingsPage />} />
             </Route>
           </Route>
@@ -66,6 +69,7 @@ export default function App() {
           <Route element={<ProtectedRoute allow={["bank"]} />}>
             <Route element={<AppLayout />}>
               <Route path="/bank/dashboard" element={<BankDashboard />} />
+              <Route path="/bank/onboarding" element={<OnboardingPacksPage role="bank" />} />
               <Route path="/bank/settings" element={<SettingsPage />} />
             </Route>
           </Route>

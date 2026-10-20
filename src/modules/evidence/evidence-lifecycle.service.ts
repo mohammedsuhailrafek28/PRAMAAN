@@ -4,7 +4,7 @@ export const EXPIRING_SOON_DAYS = 30;
 
 export type EvidenceLifecycleState = "CURRENT" | "EXPIRING_SOON" | "EXPIRED" | "CONFLICT" | "NEEDS_ATTENTION";
 
-function hasFailedCheck(value: unknown): boolean {
+export function hasFailedCheck(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasFailedCheck);
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
