@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, FileSearch, RefreshCw, ShieldAlert } from "lucide-react";
 
@@ -10,13 +10,35 @@ import { StatusPill } from "@/components/shared/StatusPill";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { ROUTES } from "@/components/layout/navigation";
 import { useToast } from "@/components/ui/use-toast";
-import { confirmEvidenceCorrection, getApiError, getEvidenceReview } from "@/services/api";
+import { cancelEvidenceReviewJob, confirmEvidenceCorrection, getApiError, getApiErrorCode, getEvidenceReviewJob, startEvidenceReviewJob } from "@/services/api";
 import { NOT_EXTERNALLY_VERIFIED } from "@/lib/trustVocabulary";
 import {
   CLAIM_LABEL, DOC_LABEL, EXTRACTION, FIELD_LABEL, METHOD_LABEL, RECONCILIATION, reviewReasonText, actionDetail, actionTitle, benchmarkSentence, issueLabel, sourceDocumentName,
-  type CorrectAction, type EvidenceReview, type ReviewDocument, type ReviewReconciliation,
+  isJobActive, jobErrorText, jobProgressPercent, jobProgressText,
+  type CorrectAction, type EvidenceReview, type ReviewDocument, type ReviewJob, type ReviewReconciliation,
 } from "@/lib/evidenceReview";
 import { formatDateTime } from "@/lib/utils";
+
+const POLL_MS = 1500;
+const MAX_POLL_FAILURES = 4;
+const pause = (ms: number) => new Promise<void>((resolve) => { window.setTimeout(resolve, ms); });
+
+/** Progress of a running review: what is being read now, how far along, and a way to stop. */
+function JobProgress({ job, onCancel, cancelling }: { job: ReviewJob; onCancel: () => void; cancelling: boolean }) {
+  const percent = jobProgressPercent(job);
+  return (
+    <div role="status" aria-live="polite" className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm font-medium text-slate-900">{jobProgressText(job)}</p>
+        <Button variant="outline" size="sm" onClick={onCancel} disabled={cancelling}>{cancelling ? "Cancelling…" : "Cancel"}</Button>
+      </div>
+      <div role="progressbar" aria-label="Documents read" aria-valuemin={0} aria-valuemax={job.docsTotal} aria-valuenow={Math.min(job.docsDone, job.docsTotal)} className="h-2 overflow-hidden rounded-full bg-slate-100">
+        <div className="h-full rounded-full bg-primary-600 transition-all" style={{ width: `${job.status === "QUEUED" ? 4 : Math.max(percent, 6)}%` }} />
+      </div>
+      <p className="text-xs text-slate-500">Scanned pages can take a minute or more each. You can leave this page open or come back later; reading continues on the server and nothing leaves it.</p>
+    </div>
+  );
+}
 
 function DocumentCard({ document }: { document: ReviewDocument }) {
   const status = EXTRACTION[document.extractionStatus];
@@ -107,31 +129,84 @@ function ReconciliationRow({ item }: { item: ReviewReconciliation }) {
 export function EvidenceReviewPage() {
   const { toast } = useToast();
   const [review, setReview] = useState<EvidenceReview | null>(null);
+  const [job, setJob] = useState<ReviewJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [pending, setPending] = useState<CorrectAction | null>(null);
+  const runToken = useRef(0);
 
-  const load = useCallback(async () => {
+  /** Starts (or joins) a review job and follows it until it finishes. Superseded by any later run, cancel, or unmount. */
+  const run = useCallback(async () => {
+    const token = ++runToken.current;
+    const current = () => token === runToken.current;
     setBusy(true);
-    try { setReview(await getEvidenceReview()); setError(null); }
-    catch (e) { setError(getApiError(e)); }
-    finally { setBusy(false); }
+    setError(null);
+    try {
+      for (let rereads = 0; ; rereads += 1) {
+        const started = await startEvidenceReviewJob();
+        if (!current()) return;
+        setJob(started.job);
+        let polled = await getEvidenceReviewJob(started.job.id);
+        let failures = 0;
+        for (;;) {
+          if (!current()) return;
+          setJob(polled.job);
+          if (!isJobActive(polled.job)) break;
+          await pause(POLL_MS);
+          if (!current()) return;
+          try {
+            polled = await getEvidenceReviewJob(started.job.id);
+            failures = 0;
+          } catch (e) {
+            failures += 1;
+            if (failures >= MAX_POLL_FAILURES) throw e;
+          }
+        }
+        if (polled.job.status === "SUCCEEDED" && polled.resultState === "READY" && polled.review) { setReview(polled.review); return; }
+        // The documents changed after reading, or the server no longer holds the results: read again (a couple of times at most).
+        if (polled.job.status === "SUCCEEDED" && rereads < 2) continue;
+        setError(polled.job.status === "SUCCEEDED" ? "Your documents changed while they were being read. Please run the review again." : jobErrorText(polled.job.errorCode));
+        return;
+      }
+    } catch (e) {
+      if (current()) setError(getApiError(e));
+    } finally {
+      if (current()) setBusy(false);
+    }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void run(); return () => { runToken.current += 1; }; }, [run]);
+
+  async function cancel() {
+    if (!job) return;
+    setCancelling(true);
+    runToken.current += 1; // stop following; the job is being cancelled
+    try { setJob((await cancelEvidenceReviewJob(job.id)).job); setError(jobErrorText("CANCELLED_BY_OWNER")); }
+    catch (e) { setError(getApiError(e)); }
+    finally { setBusy(false); setCancelling(false); }
+  }
 
   async function applyCorrection(action: CorrectAction) {
     try {
       setReview(await confirmEvidenceCorrection({ claim: action.claim, sourceDocumentId: action.sourceDocumentId, source: action.source }));
       toast({ title: "Declaration updated", description: "Your declared value was changed and the review was re-run. Your existing Trust Profile versions and sharing consents are unchanged.", variant: "success" });
     } catch (e) {
-      toast({ title: "Couldn't apply the correction", description: getApiError(e), variant: "destructive" });
-      await load();
+      const expired = getApiErrorCode(e) === "REVIEW_EXPIRED";
+      toast({ title: "Couldn't apply the correction", description: expired ? "The review results expired, so Pramaan is reading your documents again. Confirm the correction once it finishes." : getApiError(e), variant: "destructive" });
+      void run();
       throw e;
     }
   }
 
-  if (error && !review) return <ErrorState message={error} onRetry={() => void load()} />;
-  if (!review) return <LoadingState label="Reading your documents" />;
+  if (!review && error) return <ErrorState message={error} onRetry={() => void run()} />;
+  if (!review) {
+    return job ? (
+      <div className="space-y-6">
+        <PageHeader eyebrow="Trust" title="Evidence review" description="Pramaan is reading your uploaded documents. This page updates by itself." />
+        <JobProgress job={job} onCancel={() => void cancel()} cancelling={cancelling} />
+      </div>
+    ) : <LoadingState label="Starting your review" />;
+  }
 
   const { plan } = review;
   const nothingToDo = plan.actions.length === 0 && plan.unresolved.length === 0;
@@ -142,8 +217,11 @@ export function EvidenceReviewPage() {
         eyebrow="Trust"
         title="Evidence review"
         description="Pramaan reads the text of your uploaded documents, compares it with what you declared, and works out the fewest things you need to do next."
-        actions={<Button variant="outline" onClick={() => void load()} disabled={busy}><RefreshCw className={`mr-2 h-4 w-4 ${busy ? "animate-spin" : ""}`} aria-hidden />Re-run review</Button>}
+        actions={<Button variant="outline" onClick={() => void run()} disabled={busy}><RefreshCw className={`mr-2 h-4 w-4 ${busy ? "animate-spin" : ""}`} aria-hidden />Re-run review</Button>}
       />
+
+      {busy && job && isJobActive(job) && <JobProgress job={job} onCancel={() => void cancel()} cancelling={cancelling} />}
+      {error && <div role="alert" className="rounded-lg border border-warning-border bg-warning-bg p-3 text-sm text-slate-800">{error} The results below are from your last completed review.</div>}
 
       <div role="note" className="flex gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
         <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />

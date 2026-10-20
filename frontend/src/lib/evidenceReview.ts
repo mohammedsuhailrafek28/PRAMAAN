@@ -1,4 +1,5 @@
-// Types and plain-language mapping for the owner evidence review (GET /api/evidence-intelligence/review).
+// Types and plain-language mapping for the owner evidence review. Reading documents is slow, so the review is produced by a
+// background JOB (POST /api/evidence-intelligence/jobs, then poll GET /jobs/:id); the review arrives with the finished job.
 // Sensitive values arrive already masked from the server; nothing here unmasks or re-derives them.
 
 export type ReviewClaim = "legalName" | "gstin" | "pan" | "udyamNumber" | "bankAccount";
@@ -116,3 +117,37 @@ export function sourceDocumentName(review: EvidenceReview, id: string | null): s
   const document = review.documents.find((item) => item.documentId === id);
   return document ? `${DOC_LABEL[document.docType] ?? document.docType} (${document.originalName})` : null;
 }
+
+// ---- Review jobs ----
+export type JobStatus = "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+export interface ReviewJob {
+  id: string; status: JobStatus; docsTotal: number; docsDone: number; currentStep: string | null; errorCode: string | null; degraded: boolean;
+  isolation: "CONTAINER" | "LOCAL_PROCESS" | null; createdAt: string; startedAt: string | null; finishedAt: string | null;
+}
+/** READY: the review belongs to the current documents. STALE: a document changed since. EXPIRED: the server no longer holds the results. */
+export type ResultState = "READY" | "STALE" | "EXPIRED";
+export interface ReviewJobResponse { job: ReviewJob; resultState?: ResultState; review?: EvidenceReview }
+
+export const isJobActive = (job: Pick<ReviewJob, "status">) => job.status === "QUEUED" || job.status === "RUNNING";
+
+/** What the owner sees while a job is waiting or running. */
+export function jobProgressText(job: ReviewJob): string {
+  if (job.status === "QUEUED") return "Waiting for a free document reader. This starts automatically.";
+  if (job.docsTotal === 0) return "Preparing your review";
+  const step = job.currentStep?.startsWith("READING:") ? job.currentStep.slice("READING:".length) : null;
+  const position = Math.min(job.docsDone + 1, job.docsTotal);
+  return `Reading document ${position} of ${job.docsTotal}${step ? `: ${DOC_LABEL[step] ?? "document"}` : ""}`;
+}
+export const jobProgressPercent = (job: ReviewJob) => (job.docsTotal > 0 ? Math.round((Math.min(job.docsDone, job.docsTotal) / job.docsTotal) * 100) : 0);
+
+const JOB_ERROR: Record<string, string> = {
+  SERVER_RESTARTED: "The service restarted while your documents were being read. Nothing was changed. Please start the review again.",
+  JOB_INTERRUPTED: "Reading your documents was interrupted. Nothing was changed. Please start the review again.",
+  JOB_TIMEOUT: "Reading your documents took too long and was stopped. Nothing was changed. Try again, or upload clearer copies.",
+  EXTRACTION_FAILED: "Pramaan could not finish reading your documents. Nothing was changed. Please try again.",
+  DOCUMENTS_CHANGED: "Your documents changed while the review was waiting, so it was stopped. Start it again to read the latest files.",
+  SUPERSEDED: "A newer review replaced this one.",
+  CANCELLED_BY_OWNER: "The review was cancelled.",
+  QUEUE_FULL: "Document reading is busy right now. Please try again in a few minutes.",
+};
+export const jobErrorText = (code: string | null) => (code && JOB_ERROR[code]) || "The review could not be completed. Nothing was changed. Please try again.";

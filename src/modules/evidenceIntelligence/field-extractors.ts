@@ -61,6 +61,8 @@ export type DocumentExtraction = {
   /** True when any value, or the document as a whole, needs the owner's eyes before it is relied on. */
   needsReview: boolean;
   elapsedMs: number | null;
+  /** How the worker that produced this was isolated (absent for the in-process fallback parser). */
+  isolation?: "CONTAINER" | "LOCAL_PROCESS";
 };
 
 export const SUPPORTED_EXTRACTION_TYPES: ReadonlySet<DocumentType> = new Set<DocumentType>(["GST_CERTIFICATE", "UDYAM_CERTIFICATE", "BANK_STATEMENT"]);

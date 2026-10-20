@@ -103,11 +103,16 @@ def apply_hard_limits(max_memory_mb: int, cpu_seconds: int) -> str:
         try:
             import resource
 
+            # CPU seconds add up across threads (OCR runs several), so the backstop is per-core budget x 4; the wall-clock
+            # limit enforced by the caller and the cooperative time budget are the primary bounds.
+            cpu_seconds *= 4
             resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 5))
             enforced.append(f"RLIMIT_CPU {cpu_seconds}s")
-            budget = max_memory_mb * 1024 * 1024 * 3
+            # Address space is a blunt backstop for ML libraries (thread stacks and arenas are reserved, not resident), so it is
+            # generous; the real memory ceiling is the container's cgroup limit or the Windows Job Object.
+            budget = max(max_memory_mb * 1024 * 1024 * 6, 8 * 1024 ** 3)
             resource.setrlimit(resource.RLIMIT_AS, (budget, budget))
-            enforced.append("RLIMIT_AS (3x working-set budget)")
+            enforced.append("RLIMIT_AS (backstop, >= 8 GB)")
         except Exception:
             pass
     enforced.append("network sockets blocked in-process")

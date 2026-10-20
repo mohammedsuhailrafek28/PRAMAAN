@@ -2,7 +2,8 @@
 //
 // Extracted values are computed from the stored file and returned only to the owning MSME; nothing extracted is
 // persisted, logged, or put in a notification or audit row. The one exception is a short-lived in-memory result cache
-// (see `ExtractionCache`) that exists so OCR is not repeated when the owner confirms a correction right after a review.
+// (see `ExtractionCache`). Reading documents is slow (OCR), so it is done by review JOBS (evidence-review-jobs.service.ts);
+// this module only turns CACHED extractions into the review the owner sees, and never starts OCR itself.
 // Claims are changed only by an explicit owner confirmation that re-derives the value on the server.
 
 import { AuditAction } from "@prisma/client";
@@ -30,7 +31,7 @@ export const REVIEW_LIMITATIONS = [
   "Existing Passport snapshots are not changed by this review."
 ] as const;
 
-async function readStoredFile(filePath: string): Promise<Buffer | null> {
+export async function readStoredFile(filePath: string): Promise<Buffer | null> {
   const root = path.resolve(env.UPLOAD_DIR);
   const resolved = path.resolve(filePath);
   if (resolved !== root && !resolved.startsWith(root + path.sep)) return null; // never read outside the upload directory
@@ -43,7 +44,7 @@ async function readStoredFile(filePath: string): Promise<Buffer | null> {
   }
 }
 
-async function loadOwnerState(userId: string) {
+export async function loadOwnerState(userId: string) {
   const business = await prisma.business.findUnique({
     where: { userId },
     include: { user: { select: { organizationName: true } }, documents: { where: { isCurrent: true }, orderBy: [{ docType: "asc" }, { revision: "desc" }] } }
@@ -53,47 +54,67 @@ async function loadOwnerState(userId: string) {
 }
 
 /**
- * Short-lived, bounded, in-memory cache of STRUCTURED results (no page text), keyed by owner + document + file hash +
- * pipeline version, so a confirmed correction does not trigger a second OCR run. Entries expire and are never written to disk.
- * Trade-off: owner-only values live in process memory for up to the TTL; per-process, not shared across instances.
+ * Short-lived, bounded, in-memory cache of STRUCTURED results (no page text), keyed by owner + document revision + pipeline
+ * version. A document row is immutable per revision (replacing a file creates a new row), so the id identifies the content.
+ * Entries expire and are never written to disk. Trade-off: owner-only values live in process memory for up to the TTL;
+ * per-process, not shared across instances, and lost on restart (the owner then simply re-runs the review).
  */
-const PIPELINE_VERSION = "hybrid-1";
+export const PIPELINE_VERSION = "hybrid-1";
 class ExtractionCache {
-  private readonly entries = new Map<string, { at: number; value: DocumentExtraction }>();
+  private readonly entries = new Map<string, { at: number; ttl: number; value: DocumentExtraction }>();
   constructor(private readonly ttlMs: number, private readonly max: number) {}
   get(key: string, now: number): DocumentExtraction | null {
     const hit = this.entries.get(key);
     if (!hit) return null;
-    if (now - hit.at > this.ttlMs) { this.entries.delete(key); return null; }
+    if (now - hit.at > hit.ttl) { this.entries.delete(key); return null; }
     this.entries.delete(key); this.entries.set(key, hit); // refresh recency
     return hit.value;
   }
-  set(key: string, value: DocumentExtraction, now: number) {
-    this.entries.set(key, { at: now, value });
+  set(key: string, value: DocumentExtraction, now: number, ttl = this.ttlMs) {
+    this.entries.set(key, { at: now, ttl, value });
     while (this.entries.size > this.max) this.entries.delete(this.entries.keys().next().value as string);
   }
   clear() { this.entries.clear(); }
 }
-const extractionCache = new ExtractionCache(10 * 60 * 1000, 24);
+const DEGRADED_TTL_MS = 2 * 60 * 1000;
+const extractionCache = new ExtractionCache(30 * 60 * 1000, 48);
 export const clearExtractionCache = () => extractionCache.clear();
+const cacheKey = (businessId: string, documentId: string) => `${businessId}:${documentId}:${PIPELINE_VERSION}`;
 
-async function extractAll(businessId: string, documents: Array<{ id: string; docType: any; mimeType: string; filePath: string }>): Promise<DocumentExtraction[]> {
+export type DocRef = { id: string; docType: any; mimeType: string; filePath: string };
+export const MAX_REVIEW_DOCUMENTS = 6;
+
+export function cachedExtraction(businessId: string, documentId: string): DocumentExtraction | null {
+  return extractionCache.get(cacheKey(businessId, documentId), Date.now());
+}
+
+/** Extractions of all (up to six) current documents, or null if any is not in the cache. Never reads or OCRs a file. */
+export function cachedExtractions(businessId: string, documents: DocRef[]): DocumentExtraction[] | null {
   const results: DocumentExtraction[] = [];
-  for (const document of documents.slice(0, 6)) {
-    const bytes = await readStoredFile(document.filePath);
-    if (!bytes) {
-      results.push({ documentId: document.id, docType: document.docType, status: "UNREADABLE", reason: "NO_EXTRACTABLE_TEXT", fields: [], pageCount: 0, engine: "HYBRID", ocrPages: 0, pages: [], table: null, needsReview: false, elapsedMs: null });
-      continue;
-    }
-    const key = `${businessId}:${document.id}:${createHash("sha256").update(bytes).digest("hex")}:${PIPELINE_VERSION}`;
-    const cached = extractionCache.get(key, Date.now());
-    if (cached) { results.push(cached); continue; }
-    const result = await extractDocumentHybrid({ documentId: document.id, docType: document.docType, mimeType: document.mimeType, bytes });
-    // A degraded or busy result is not cached, so the next review can try the full pipeline again.
-    if (result.engine === "HYBRID" && result.status !== "UNSUPPORTED") extractionCache.set(key, result, Date.now());
-    results.push(result);
+  for (const document of documents.slice(0, MAX_REVIEW_DOCUMENTS)) {
+    const hit = cachedExtraction(businessId, document.id);
+    if (!hit) return null;
+    results.push(hit);
   }
   return results;
+}
+
+/** Reads one document (OCR if needed) unless its result is cached. Called by review jobs only. */
+export async function extractOne(businessId: string, document: DocRef, signal?: AbortSignal): Promise<{ extraction: DocumentExtraction; fromCache: boolean }> {
+  const hit = cachedExtraction(businessId, document.id);
+  if (hit) return { extraction: hit, fromCache: true };
+  const bytes = await readStoredFile(document.filePath);
+  if (!bytes) {
+    const missing: DocumentExtraction = { documentId: document.id, docType: document.docType, status: "UNREADABLE", reason: "NO_EXTRACTABLE_TEXT", fields: [], pageCount: 0, engine: "HYBRID", ocrPages: 0, pages: [], table: null, needsReview: false, elapsedMs: null };
+    extractionCache.set(cacheKey(businessId, document.id), missing, Date.now(), DEGRADED_TTL_MS);
+    return { extraction: missing, fromCache: false };
+  }
+  const extraction = await extractDocumentHybrid({ documentId: document.id, docType: document.docType, mimeType: document.mimeType, bytes, signal });
+  // Every result is held so the finished job can show a review. A degraded result (worker down, fallback reader) or an
+  // unsupported file is held only briefly, so the owner's next review retries the full pipeline soon.
+  const degraded = extraction.engine !== "HYBRID" || extraction.reason === "WORKER_UNAVAILABLE" || extraction.status === "UNSUPPORTED";
+  extractionCache.set(cacheKey(businessId, document.id), extraction, Date.now(), degraded ? DEGRADED_TTL_MS : undefined);
+  return { extraction, fromCache: false };
 }
 
 function serializeAction(action: PlanAction) {
@@ -126,9 +147,15 @@ function serializeReconciliation(item: ClaimReconciliation) {
   };
 }
 
+/** Review from CACHED extractions only (409 if they are not ready: the owner starts a review job first). */
 export async function getReview(userId: string, now = new Date()) {
   const business = await loadOwnerState(userId);
-  const extractions = await extractAll(business.id, business.documents);
+  const extractions = cachedExtractions(business.id, business.documents);
+  if (!extractions) throw new ApiError(409, "REVIEW_NOT_READY", "Your documents have not been read yet. Start an evidence review first.");
+  return buildReview(business, extractions, now);
+}
+
+export function buildReview(business: Awaited<ReturnType<typeof loadOwnerState>>, extractions: DocumentExtraction[], now: Date) {
   const { issues, reconciliations, plan } = planEvidenceChallenge({ business, organizationName: business.user.organizationName, documents: business.documents, extractions, now });
   return {
     generatedAt: now.toISOString(),
@@ -185,7 +212,8 @@ export type CorrectionRequest = { claim: CorrectableClaim; sourceDocumentId: str
 /** Applies one owner-confirmed correction. The value is re-derived on the server; the client never supplies it. */
 export async function confirmCorrection(userId: string, request: CorrectionRequest, now = new Date()) {
   const business = await loadOwnerState(userId);
-  const extractions = await extractAll(business.id, business.documents);
+  const extractions = cachedExtractions(business.id, business.documents);
+  if (!extractions) throw new ApiError(409, "REVIEW_EXPIRED", "The review results have expired. Re-run the evidence review, then confirm the correction.");
   const { plan } = planEvidenceChallenge({ business, organizationName: business.user.organizationName, documents: business.documents, extractions, now });
   const action = plan.actions.find((item) => item.type === "CORRECT_CLAIM" && item.claim === request.claim && item.source === request.source && item.sourceDocumentId === request.sourceDocumentId);
   if (!action || action.type !== "CORRECT_CLAIM") {

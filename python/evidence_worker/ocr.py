@@ -5,6 +5,7 @@ here because no Tesseract binary is available in the reference environment and u
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import List, Optional, Tuple
 
@@ -40,7 +41,17 @@ def _get_engine():
     if _engine is None:
         from rapidocr_onnxruntime import RapidOCR
 
-        _engine = RapidOCR()
+        # Bounded thread pools: by default OpenCV and ONNX Runtime start one thread per CPU core, which exhausts a container's
+        # pid limit (and address space) on large hosts. Two intra-op threads keep latency reasonable and resource use predictable.
+        threads = int(os.environ.get("EVIDENCE_OCR_THREADS", "2"))
+        try:
+            import cv2
+
+            cv2.setNumThreads(threads)
+        except Exception:
+            pass
+        options = {f"{stage}_{key}": value for stage in ("det", "cls", "rec") for key, value in (("intra_op_num_threads", threads), ("inter_op_num_threads", 1))}
+        _engine = RapidOCR(**options)
         original = _engine.text_cls
 
         def recording(crops):

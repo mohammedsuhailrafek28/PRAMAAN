@@ -5,14 +5,19 @@
 //  * handed an isolated copy of the file; the copy and its directory are removed in `finally`, success or not;
 //  * limited by a wall-clock timeout (the process is killed), an output-size cap, and a concurrency/queue cap;
 //  * its JSON is validated against a strict schema before anything uses it.
-// Document content is never logged. A worker that is missing or fails to start yields `null` so the caller can fall back.
+// Two isolation modes (EVIDENCE_WORKER_MODE): "container" runs the worker in a locked-down one-shot Docker container (see
+// worker-container.ts; file on stdin, JSON on stdout, no network/volumes/env) and "local" runs it as a bounded child process.
+// LOCAL IS LESS ISOLATED and is meant for development; production defaults to container and never silently downgrades.
+// Document content is never logged. A worker that is missing or fails to start yields `null` so the caller can decide.
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { ApiError } from "../../utils/apiError.js";
+import { containerRunArgs, dockerCliEnvironment, dockerExecutable } from "./worker-container.js";
 
 export const WORKER_DEFAULTS = {
   timeoutMs: 120_000,
@@ -80,7 +85,20 @@ export const workerOutputSchema = z.object({
 export type WorkerOutput = z.infer<typeof workerOutputSchema>;
 export type WorkerKind = "pdf" | "png" | "jpeg";
 
-export type WorkerRun = { output: WorkerOutput; wallMs: number };
+export type WorkerIsolation = "CONTAINER" | "LOCAL_PROCESS";
+export type WorkerRun = { output: WorkerOutput; wallMs: number; isolation: WorkerIsolation };
+
+/** Thrown when the caller aborts an extraction (job cancelled); never treated as a worker failure. */
+export class ExtractionAborted extends Error {
+  constructor() { super("EXTRACTION_ABORTED"); }
+}
+
+export function workerMode(): "container" | "local" {
+  const configured = process.env.EVIDENCE_WORKER_MODE;
+  if (configured === "container" || configured === "local") return configured;
+  return process.env.NODE_ENV === "production" ? "container" : "local";
+}
+export const workerIsolation = (): WorkerIsolation => (workerMode() === "container" ? "CONTAINER" : "LOCAL_PROCESS");
 
 const workerRoot = path.resolve(process.env.EVIDENCE_WORKER_DIR ?? path.join(process.cwd(), "python"));
 const pythonExecutable = () => process.env.EVIDENCE_WORKER_PYTHON ?? (process.platform === "win32" ? "python" : "python3");
@@ -104,13 +122,24 @@ function minimalEnvironment(tempDir: string): NodeJS.ProcessEnv {
   const keep = ["PATH", "SYSTEMROOT", "SystemRoot", "SYSTEMDRIVE", "WINDIR", "APPDATA", "LOCALAPPDATA", "USERPROFILE", "HOME", "LANG", "LC_ALL", "VIRTUAL_ENV", "PYTHONHOME"];
   const env: NodeJS.ProcessEnv = {};
   for (const key of keep) if (process.env[key] !== undefined) env[key] = process.env[key];
-  return { ...env, TEMP: tempDir, TMP: tempDir, TMPDIR: tempDir, PYTHONIOENCODING: "utf-8", PYTHONDONTWRITEBYTECODE: "1", PYTHONUNBUFFERED: "1", OMP_NUM_THREADS: "2" };
+  // EVIDENCE_PDF_BACKEND selects the (experimental) PDF library; it is configuration, not a secret.
+  const backend = process.env.EVIDENCE_PDF_BACKEND ? { EVIDENCE_PDF_BACKEND: process.env.EVIDENCE_PDF_BACKEND } : {};
+  return { ...env, ...backend, TEMP: tempDir, TMP: tempDir, TMPDIR: tempDir, PYTHONIOENCODING: "utf-8", PYTHONDONTWRITEBYTECODE: "1", PYTHONUNBUFFERED: "1", OMP_NUM_THREADS: "2" };
 }
 
+function workerFlags(kind: WorkerKind): string[] {
+  const limits = WORKER_DEFAULTS.limits;
+  return ["--kind", kind, "--max-pages", String(limits.maxPages), "--max-ocr-pages", String(limits.maxOcrPages), "--max-pixels", String(limits.maxPixels), "--dpi", String(limits.dpi),
+    "--time-budget", String(limits.timeBudgetSeconds), "--max-memory-mb", String(limits.maxMemoryMb)];
+}
+
+/** True when the configured isolation mode can run a worker right now (container mode: docker reachable and the image present). */
 export async function workerAvailable(): Promise<boolean> {
   return new Promise((resolve) => {
     try {
-      const child = spawn(pythonExecutable(), ["-c", "import fitz"], { cwd: workerRoot, stdio: "ignore", shell: false, windowsHide: true });
+      const child = workerMode() === "container"
+        ? spawn(dockerExecutable(), ["image", "inspect", process.env.EVIDENCE_WORKER_IMAGE ?? "pramaan-evidence-worker:local"], { stdio: "ignore", shell: false, windowsHide: true, env: dockerCliEnvironment() })
+        : spawn(pythonExecutable(), ["-c", "import fitz"], { cwd: workerRoot, stdio: "ignore", shell: false, windowsHide: true });
       child.on("error", () => resolve(false));
       child.on("exit", (code) => resolve(code === 0));
     } catch {
@@ -119,46 +148,73 @@ export async function workerAvailable(): Promise<boolean> {
   });
 }
 
-/** Runs the worker on `bytes`. Resolves null when the worker cannot be started or returns invalid output. */
-export async function runWorker(bytes: Buffer, kind: WorkerKind, options: { timeoutMs?: number } = {}): Promise<WorkerRun | null> {
+type Execution = { command: string; args: string[]; options: Parameters<typeof spawn>[2]; stdin?: Buffer; onKill?: () => void };
+
+/** Runs one prepared child with timeout, abort, output cap and schema validation. Resolves null on any failure. */
+function execute(spec: Execution, timeoutMs: number, signal: AbortSignal | undefined, isolation: WorkerIsolation, started: number): Promise<WorkerRun | null> {
+  return new Promise<WorkerRun | null>((resolve) => {
+    let settled = false;
+    let child: ReturnType<typeof spawn>;
+    const kill = () => { try { spec.onKill?.(); child?.kill("SIGKILL"); } catch { /* already gone */ } };
+    const finish = (value: WorkerRun | null) => { if (!settled) { settled = true; clearTimeout(timer); signal?.removeEventListener("abort", onAbort); resolve(value); } };
+    const onAbort = () => { kill(); finish(null); };
+    const timer = setTimeout(() => { kill(); finish(null); }, timeoutMs);
+    try {
+      child = spawn(spec.command, spec.args, { ...spec.options, shell: false, windowsHide: true, stdio: [spec.stdin ? "pipe" : "ignore", "pipe", "ignore"] });
+    } catch {
+      finish(null);
+      return;
+    }
+    if (signal) { if (signal.aborted) { onAbort(); return; } signal.addEventListener("abort", onAbort, { once: true }); }
+    const chunks: Buffer[] = [];
+    let size = 0;
+    child.stdout?.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > WORKER_DEFAULTS.maxStdoutBytes) { kill(); finish(null); return; }
+      chunks.push(chunk);
+    });
+    child.on("error", () => finish(null));
+    child.on("close", () => {
+      try {
+        const parsed = workerOutputSchema.safeParse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        finish(parsed.success ? { output: parsed.data, wallMs: Date.now() - started, isolation } : null);
+      } catch {
+        finish(null);
+      }
+    });
+    if (spec.stdin && child.stdin) {
+      child.stdin.on("error", () => undefined); // the worker may exit before reading everything (e.g. oversize); not an error here
+      child.stdin.end(spec.stdin);
+    }
+  });
+}
+
+/**
+ * Runs the worker on `bytes`. Resolves null when the worker cannot be started or returns invalid output; throws
+ * ExtractionAborted when `signal` was aborted by the caller.
+ */
+export async function runWorker(bytes: Buffer, kind: WorkerKind, options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<WorkerRun | null> {
+  if (options.signal?.aborted) throw new ExtractionAborted();
   await acquire();
   const started = Date.now();
+  const timeoutMs = options.timeoutMs ?? WORKER_DEFAULTS.timeoutMs;
   let tempDir: string | null = null;
   try {
-    tempDir = await mkdtemp(path.join(os.tmpdir(), "pramaan-extract-"));
-    const input = path.join(tempDir, kind === "pdf" ? "input.pdf" : `input.${kind === "jpeg" ? "jpg" : "png"}`);
-    await writeFile(input, bytes, { mode: 0o600 });
-    const limits = WORKER_DEFAULTS.limits;
-    const args = ["-m", "evidence_worker.worker", "--input", input, "--kind", kind, "--max-pages", String(limits.maxPages), "--max-ocr-pages", String(limits.maxOcrPages),
-      "--max-pixels", String(limits.maxPixels), "--dpi", String(limits.dpi), "--time-budget", String(limits.timeBudgetSeconds), "--max-memory-mb", String(limits.maxMemoryMb)];
-    return await new Promise<WorkerRun | null>((resolve) => {
-      let settled = false;
-      const finish = (value: WorkerRun | null) => { if (!settled) { settled = true; clearTimeout(timer); resolve(value); } };
-      let child;
-      try {
-        child = spawn(pythonExecutable(), args, { cwd: workerRoot, env: minimalEnvironment(tempDir as string), stdio: ["ignore", "pipe", "ignore"], shell: false, windowsHide: true });
-      } catch {
-        resolve(null);
-        return;
-      }
-      const chunks: Buffer[] = [];
-      let size = 0;
-      const timer = setTimeout(() => { child.kill("SIGKILL"); finish(null); }, options.timeoutMs ?? WORKER_DEFAULTS.timeoutMs);
-      child.stdout.on("data", (chunk: Buffer) => {
-        size += chunk.length;
-        if (size > WORKER_DEFAULTS.maxStdoutBytes) { child.kill("SIGKILL"); finish(null); return; }
-        chunks.push(chunk);
-      });
-      child.on("error", () => finish(null));
-      child.on("close", () => {
-        try {
-          const parsed = workerOutputSchema.safeParse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-          finish(parsed.success ? { output: parsed.data, wallMs: Date.now() - started } : null);
-        } catch {
-          finish(null);
-        }
-      });
-    });
+    let result: WorkerRun | null;
+    if (workerMode() === "container") {
+      const name = `pramaan-xw-${randomBytes(8).toString("hex")}`;
+      const args = containerRunArgs({ name, command: [...workerFlags(kind), "--stdin"] });
+      const kill = () => { try { spawn(dockerExecutable(), ["rm", "-f", name], { stdio: "ignore", shell: false, windowsHide: true, env: dockerCliEnvironment() }).on("error", () => undefined); } catch { /* best effort */ } };
+      result = await execute({ command: dockerExecutable(), args, options: { env: dockerCliEnvironment() }, stdin: bytes, onKill: kill }, timeoutMs, options.signal, "CONTAINER", started);
+      if (!result) kill(); // also removes a container whose CLI exited early
+    } else {
+      tempDir = await mkdtemp(path.join(os.tmpdir(), "pramaan-extract-"));
+      const input = path.join(tempDir, kind === "pdf" ? "input.pdf" : `input.${kind === "jpeg" ? "jpg" : "png"}`);
+      await writeFile(input, bytes, { mode: 0o600 });
+      result = await execute({ command: pythonExecutable(), args: ["-m", "evidence_worker.worker", "--input", input, ...workerFlags(kind)], options: { cwd: workerRoot, env: minimalEnvironment(tempDir) } }, timeoutMs, options.signal, "LOCAL_PROCESS", started);
+    }
+    if (options.signal?.aborted) throw new ExtractionAborted();
+    return result;
   } finally {
     if (tempDir) await rm(tempDir, { recursive: true, force: true, maxRetries: 3 }).catch(() => undefined);
     release();

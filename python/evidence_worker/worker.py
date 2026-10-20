@@ -18,7 +18,8 @@ from .limits import LimitExceeded, apply_hard_limits, block_network, peak_workin
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True)
+    parser.add_argument("--input")
+    parser.add_argument("--stdin", action="store_true", help="read the file from standard input (container hand-off: no mounted volume)")
     parser.add_argument("--kind", choices=["pdf", "png", "jpeg"], default="pdf")
     parser.add_argument("--max-bytes", type=int, default=5 * 1024 * 1024)
     parser.add_argument("--max-pages", type=int, default=40)
@@ -28,6 +29,8 @@ def main(argv=None) -> int:
     parser.add_argument("--time-budget", type=float, default=80.0)
     parser.add_argument("--max-memory-mb", type=int, default=1500)
     args = parser.parse_args(argv)
+    if bool(args.input) == bool(args.stdin):
+        parser.error("exactly one of --input or --stdin is required")
 
     started = time.monotonic()
     import fitz
@@ -44,7 +47,18 @@ def main(argv=None) -> int:
     def empty(status: str, reason: str) -> dict:
         return {"schema": 1, "status": status, "reason": reason, "pageCount": 0, "processedPages": 0, "activeContent": [], "pages": [], "tables": [], "ocrPages": 0, "notes": []}
 
+    scratch = None
     try:
+        if args.stdin:
+            # Bounded read of the hand-off; the copy lives in this process's own temporary directory and is removed below.
+            import tempfile
+
+            data = sys.stdin.buffer.read(args.max_bytes + 1)
+            scratch = tempfile.mkdtemp(prefix="xw-")
+            args.input = os.path.join(scratch, "input.bin")
+            with open(args.input, "wb") as handle:
+                handle.write(data)
+            del data
         if os.path.getsize(args.input) > args.max_bytes:
             result = empty("REJECTED", "TOO_LARGE")
         elif args.kind != "pdf":
@@ -60,6 +74,11 @@ def main(argv=None) -> int:
     except Exception as error:  # never echo content; the class name is enough for operators
         print(f"worker error: {type(error).__name__}", file=sys.stderr)
         result = empty("UNREADABLE", "PARSE_ERROR")
+    finally:
+        if scratch:
+            import shutil
+
+            shutil.rmtree(scratch, ignore_errors=True)
     result["engine"] = {"pymupdf": fitz.VersionBind, "ocr": ocr.engine_version() if ocr.available() else None, "python": sys.version.split()[0]}
     result["metrics"] = {"elapsedMs": int((time.monotonic() - started) * 1000), "peakWorkingSetMb": round(peak_working_set_mb(), 1), "enforced": enforced}
     sys.stdout.write(json.dumps(result, ensure_ascii=True, separators=(",", ":")))

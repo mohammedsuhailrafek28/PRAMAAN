@@ -7,6 +7,7 @@ import { requireRole } from "../../middleware/roles.js";
 import { validate } from "../../middleware/validate.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { confirmCorrection, getReview } from "./evidence-intelligence.service.js";
+import { cancelReviewJob, getReviewJob, startReviewJob } from "./evidence-review-jobs.service.js";
 
 const router = Router();
 
@@ -28,14 +29,43 @@ const correctionBody = z.object({
   confirm: z.literal(true)
 }).strict();
 
-router.use(requireAuth, requireRole([UserRole.MSME]), reviewLimit);
+// Polling is frequent and cheap (a row read), so it has its own, much more generous limit.
+const pollLimit = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 900,
+  keyGenerator: (req) => req.user?.id ?? "anonymous",
+  validate: { keyGeneratorIpFallback: false },
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: "RATE_LIMITED", message: "Too many status checks. Please wait a moment." } }
+});
+const jobParams = z.object({ jobId: z.string().min(1).max(64) });
 
-router.get("/review", asyncHandler(async (req, res) => {
+router.use(requireAuth, requireRole([UserRole.MSME]));
+
+// Start (or join) a review job. Returns immediately with a job id; the work happens in the background.
+router.post("/jobs", reviewLimit, asyncHandler(async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.status(202).json(await startReviewJob(req.user!.id));
+}));
+
+router.get("/jobs/:jobId", pollLimit, validate({ params: jobParams }), asyncHandler(async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json(await getReviewJob(req.user!.id, String(req.params.jobId)));
+}));
+
+router.post("/jobs/:jobId/cancel", reviewLimit, validate({ params: jobParams }), asyncHandler(async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json(await cancelReviewJob(req.user!.id, String(req.params.jobId)));
+}));
+
+
+router.get("/review", reviewLimit, asyncHandler(async (req, res) => {
   res.set("Cache-Control", "no-store");
   res.json({ review: await getReview(req.user!.id) });
 }));
 
-router.post("/corrections", validate({ body: correctionBody }), asyncHandler(async (req, res) => {
+router.post("/corrections", reviewLimit, validate({ body: correctionBody }), asyncHandler(async (req, res) => {
   res.set("Cache-Control", "no-store");
   const { claim, sourceDocumentId, source } = req.body as z.infer<typeof correctionBody>;
   res.json({ review: await confirmCorrection(req.user!.id, { claim, sourceDocumentId, source }) });

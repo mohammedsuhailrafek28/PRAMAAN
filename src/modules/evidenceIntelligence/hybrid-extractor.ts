@@ -8,9 +8,9 @@ import type { DocumentType } from "@prisma/client";
 import { extractDomainFields } from "./domain-extraction.js";
 import { extractDocumentLegacy, SUPPORTED_EXTRACTION_TYPES, type DocumentExtraction } from "./field-extractors.js";
 import { PDF_LIMITS } from "./pdf-text.js";
-import { runWorker, type WorkerKind } from "./worker-client.js";
+import { runWorker, workerMode, type WorkerKind } from "./worker-client.js";
 
-export type HybridInput = { documentId: string; docType: DocumentType; mimeType: string; bytes: Buffer };
+export type HybridInput = { documentId: string; docType: DocumentType; mimeType: string; bytes: Buffer; signal?: AbortSignal };
 
 const hasPdfHeader = (bytes: Buffer) => bytes.subarray(0, 1024).includes("%PDF-");
 const isPng = (bytes: Buffer) => bytes.length > 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
@@ -38,8 +38,10 @@ export async function extractDocumentHybrid(input: HybridInput): Promise<Documen
     return blank(input, "UNSUPPORTED", "NOT_A_PDF");
   }
 
-  const run = await runWorker(input.bytes, kind);
-  if (run) return extractDomainFields({ documentId: input.documentId, docType: input.docType, output: run.output, wallMs: run.wallMs });
+  const run = await runWorker(input.bytes, kind, { signal: input.signal });
+  if (run) return { ...extractDomainFields({ documentId: input.documentId, docType: input.docType, output: run.output, wallMs: run.wallMs }), isolation: run.isolation };
+  // Container mode never falls back to parsing in the API process: a failed worker is reported, not silently downgraded.
+  if (workerMode() === "container") return blank(input, "UNREADABLE", "WORKER_UNAVAILABLE");
   if (kind === "pdf") { const legacy = extractDocumentLegacy(input); return { ...legacy, reason: legacy.reason ?? "WORKER_UNAVAILABLE_FALLBACK" }; }
   return blank(input, "UNSUPPORTED", "WORKER_UNAVAILABLE");
 }

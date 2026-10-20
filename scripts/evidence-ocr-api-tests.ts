@@ -23,7 +23,7 @@ let corpus = "";
 type Json = Record<string, any>;
 const pass = (message: string) => console.log(`PASS ${message}`);
 
-async function request(method: string, url: string, options: { token?: string; body?: unknown; form?: FormData; expected?: number[] } = {}) {
+async function rawRequest(method: string, url: string, options: { token?: string; body?: unknown; form?: FormData; expected?: number[] } = {}) {
   const headers: Record<string, string> = {};
   if (options.token) headers.Authorization = `Bearer ${options.token}`;
   let body: BodyInit | undefined;
@@ -34,6 +34,23 @@ async function request(method: string, url: string, options: { token?: string; b
   const data = text ? JSON.parse(text) : {};
   if (!(options.expected ?? [200, 201]).includes(response.status)) throw new Error(`${method} ${url} returned ${response.status}: ${text}`);
   return { status: response.status, data, text };
+}
+
+type RequestOptions = { token?: string; body?: unknown; form?: FormData; expected?: number[] };
+/** Reviews are produced by jobs: start one and poll it, returning the same shape GET /review used to return. */
+async function request(method: string, url: string, options: RequestOptions = {}) {
+  if (method !== "GET" || url !== "/api/evidence-intelligence/review" || !options.token) return rawRequest(method, url, options);
+  const started = await rawRequest("POST", "/api/evidence-intelligence/jobs", { token: options.token, expected: [202, 401, 403, 404] });
+  if (started.status !== 202) return started;
+  const jobId = started.data.job.id as string;
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const polled = await rawRequest("GET", `/api/evidence-intelligence/jobs/${jobId}`, { token: options.token });
+    const status = polled.data.job.status as string;
+    if (status === "SUCCEEDED") return { ...polled, data: { review: polled.data.review, job: polled.data.job, resultState: polled.data.resultState } };
+    if (status === "FAILED" || status === "CANCELLED") throw new Error(`review job ${status}: ${polled.text}`);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error("review job did not finish in time");
 }
 const register = async (role: string, email: string, organizationName: string) => {
   const result = await request("POST", "/api/auth/register", { body: { role, name: `${role} OCR Test`, organizationName, email, password: "password123" } });

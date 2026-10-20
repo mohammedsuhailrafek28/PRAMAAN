@@ -12,7 +12,7 @@ import path from "node:path";
 import { extractDocumentHybrid } from "../src/modules/evidenceIntelligence/hybrid-extractor.js";
 import type { DocumentExtraction } from "../src/modules/evidenceIntelligence/field-extractors.js";
 import { compareNames } from "../src/modules/evidenceIntelligence/reconciliation.js";
-import { workerAvailable } from "../src/modules/evidenceIntelligence/worker-client.js";
+import { workerAvailable, workerMode } from "../src/modules/evidenceIntelligence/worker-client.js";
 
 type Case = { id: string; file: string; category: string; variant: string; docType: any; layout: string; truth: { fields: Record<string, string>; rows: Array<{ date: string | null; debit: number | null; credit: number | null; balance: number | null }> }; expected?: string };
 
@@ -27,7 +27,7 @@ const python = process.env.EVIDENCE_WORKER_PYTHON ?? (process.platform === "win3
 
 async function main() {
   if (!(await workerAvailable())) {
-    console.error("SKIPPED (not passed): the Python worker dependencies are not installed here. See docs/HORIZON_DOCUMENT_INTELLIGENCE.md.");
+    console.error("SKIPPED (not passed): the worker is not available in mode \"" + workerMode() + "\" (local: pip install -r python/requirements.txt AND python/requirements-eval.txt for the corpus generator; container: npm run worker:image). See docs/HORIZON_DOCUMENT_INTELLIGENCE.md.");
     process.exit(2);
   }
   const corpus = mkdtempSync(path.join(os.tmpdir(), "pramaan-hybrid-corpus-"));
@@ -149,17 +149,26 @@ async function main() {
       assert.equal((await run(js as Case)).status, "REJECTED");
     });
 
-    await test("when the worker cannot start, PDFs fall back to the basic reader and the result says so", async () => {
-      const saved = process.env.EVIDENCE_WORKER_PYTHON;
+    await test("when the worker cannot start: local mode falls back to the basic reader (labelled); container mode fails closed", async () => {
+      const container = workerMode() === "container";
+      const savedPython = process.env.EVIDENCE_WORKER_PYTHON;
+      const savedImage = process.env.EVIDENCE_WORKER_IMAGE;
       process.env.EVIDENCE_WORKER_PYTHON = "python-that-does-not-exist";
+      process.env.EVIDENCE_WORKER_IMAGE = "pramaan-evidence-worker:does-not-exist";
       try {
         const result = await run(pick("GST_CERTIFICATE", "text"));
-        assert.equal(result.engine, "LEGACY");
-        assert.ok(result.reason !== null);
-        const scan = await run(pick("GST_CERTIFICATE", "scan300"));
-        assert.ok(scan.status !== "EXTRACTED", "a scan is not 'read' by the fallback");
+        if (container) {
+          assert.equal(result.status, "UNREADABLE");
+          assert.equal(result.reason, "WORKER_UNAVAILABLE");
+        } else {
+          assert.equal(result.engine, "LEGACY");
+          assert.ok(result.reason !== null);
+          const scan = await run(pick("GST_CERTIFICATE", "scan300"));
+          assert.ok(scan.status !== "EXTRACTED", "a scan is not 'read' by the fallback");
+        }
       } finally {
-        if (saved === undefined) delete process.env.EVIDENCE_WORKER_PYTHON; else process.env.EVIDENCE_WORKER_PYTHON = saved;
+        if (savedPython === undefined) delete process.env.EVIDENCE_WORKER_PYTHON; else process.env.EVIDENCE_WORKER_PYTHON = savedPython;
+        if (savedImage === undefined) delete process.env.EVIDENCE_WORKER_IMAGE; else process.env.EVIDENCE_WORKER_IMAGE = savedImage;
       }
     });
 

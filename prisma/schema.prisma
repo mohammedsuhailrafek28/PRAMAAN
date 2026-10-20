@@ -445,3 +445,25 @@ model GeneratedReport {
   @@index([reportType])
   @@index([readinessEvaluationId])
 }
+
+/// Metadata of an owner evidence-review job. No extracted content is stored; no relation to consent/Passport/trust models.
+model EvidenceReviewJob {
+  id              String    @id @default(cuid())
+  businessId      String
+  userId          String
+  status          String
+  fingerprint     String
+  docsTotal       Int       @default(0)
+  docsDone        Int       @default(0)
+  currentStep     String?
+  errorCode       String?
+  degraded        Boolean   @default(false)
+  isolation       String?
+  createdAt       DateTime  @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  heartbeatAt     DateTime?
+
+  @@index([businessId, createdAt])
+  @@index([status, createdAt])
+}

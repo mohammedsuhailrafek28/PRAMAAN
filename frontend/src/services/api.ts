@@ -11,6 +11,7 @@ import { formatSharedFields } from "@/lib/sharedFields";
 import { parseScope, type DisclosureScope } from "@/lib/disclosure";
 import { identityFromPayload, parseRequesterIdentity } from "@/lib/requesterIdentity";
 import type { CorrectableClaim, CorrectionSource, EvidenceReview } from "@/lib/evidenceReview";
+import type { ReviewJobResponse } from "@/lib/evidenceReview";
 import { TOKEN_KEY, isSessionExpiry, notifyUnauthorized } from "@/services/session";
 
 const API_URL = (import.meta.env?.VITE_API_URL || "http://localhost:4000/api").replace(/\/$/, "");
@@ -345,7 +346,10 @@ export async function getReportFile(reportId: string, kind: "preview" | "pdf"): 
 }
 
 // ---- Evidence review (owner-only; values are masked by the server) ----
-export async function getEvidenceReview(): Promise<EvidenceReview> { const { data } = await client.get("/evidence-intelligence/review", { timeout: 30000 }); return data.review; }
+/** Reading documents can take minutes, so a review is a background job: start it (returns at once), then poll its status. */
+export async function startEvidenceReviewJob(): Promise<ReviewJobResponse> { const { data } = await client.post("/evidence-intelligence/jobs", {}, { timeout: 15000 }); return { job: data.job }; }
+export async function getEvidenceReviewJob(jobId: string): Promise<ReviewJobResponse> { const { data } = await client.get(`/evidence-intelligence/jobs/${encodeURIComponent(jobId)}`, { timeout: 15000 }); return { job: data.job, resultState: data.resultState, review: data.review }; }
+export async function cancelEvidenceReviewJob(jobId: string): Promise<ReviewJobResponse> { const { data } = await client.post(`/evidence-intelligence/jobs/${encodeURIComponent(jobId)}/cancel`, {}, { timeout: 15000 }); return { job: data.job }; }
 /** The server re-derives the corrected value itself; the client only names which proposal it confirms. */
 export async function confirmEvidenceCorrection(input: { claim: CorrectableClaim; sourceDocumentId: string | null; source: CorrectionSource }): Promise<EvidenceReview> {
   const { data } = await client.post("/evidence-intelligence/corrections", { ...input, confirm: true }, { timeout: 30000 });

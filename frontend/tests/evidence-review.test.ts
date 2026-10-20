@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { RECONCILIATION, EXTRACTION, METHOD_LABEL, reviewReasonText, actionDetail, actionTitle, benchmarkSentence, issueLabel, type CorrectAction, type EvidenceReview, type SubmitAction } from "../src/lib/evidenceReview.ts";
+import { RECONCILIATION, EXTRACTION, METHOD_LABEL, reviewReasonText, actionDetail, actionTitle, benchmarkSentence, issueLabel, isJobActive, jobErrorText, jobProgressPercent, jobProgressText, type ReviewJob, type CorrectAction, type EvidenceReview, type SubmitAction } from "../src/lib/evidenceReview.ts";
 
 const submit: SubmitAction = { id: "SUBMIT:UDYAM_CERTIFICATE", type: "SUBMIT_DOCUMENT", docType: "UDYAM_CERTIFICATE", reason: "EXPIRED", resolves: ["DOC:UDYAM_CERTIFICATE"], resolution: "CONDITIONAL_ON_NEW_DOCUMENT_CONTENT", requiresOwnerConfirmation: false };
 const correct: CorrectAction = { id: "CORRECT:pan", type: "CORRECT_CLAIM", claim: "pan", sourceDocumentId: "d1", source: "DOCUMENT_TEXT", proposedDisplay: "AB******4F", resolves: ["CONFLICT:pan"], resolution: "VERIFIED_BY_RULES", requiresOwnerConfirmation: true };
@@ -43,4 +43,30 @@ test("uncertain readings get plain-language labels and never read as conflicts",
 test("benchmark sentence reports all three counts honestly", () => {
   const b: EvidenceReview["plan"]["benchmark"] = { fullPackDocuments: 3, outstandingOnlyDocuments: 0, plannedDocuments: 0, plannedOwnerActions: 1, openIssues: 3, issuesClosedByPlan: 2, issuesAddressedByOutstandingOnly: 0, issuesAddressedByFullPack: 0 };
   assert.equal(benchmarkSentence(b), "Asking for the full pack would mean 3 documents. A checklist of only missing or expired items would ask for 0 documents. This plan asks for 0 documents and 1 confirmed correction.");
+});
+
+const job = (overrides: Partial<ReviewJob> = {}): ReviewJob => ({ id: "j1", status: "RUNNING", docsTotal: 3, docsDone: 1, currentStep: "READING:BANK_STATEMENT", errorCode: null, degraded: false, isolation: "CONTAINER", createdAt: "2026-10-20T10:00:00Z", startedAt: "2026-10-20T10:00:01Z", finishedAt: null, ...overrides });
+
+test("job progress is stated in plain language and never exceeds the document count", () => {
+  assert.equal(jobProgressText(job()), "Reading document 2 of 3: Bank statement");
+  assert.equal(jobProgressText(job({ docsDone: 3 })), "Reading document 3 of 3: Bank statement");
+  assert.match(jobProgressText(job({ status: "QUEUED", currentStep: null, docsDone: 0 })), /Waiting for a free document reader/);
+  assert.equal(jobProgressPercent(job()), 33);
+  assert.equal(jobProgressPercent(job({ docsTotal: 0, docsDone: 0 })), 0);
+});
+
+test("only queued and running jobs are polled", () => {
+  assert.equal(isJobActive(job({ status: "QUEUED" })), true);
+  assert.equal(isJobActive(job({ status: "RUNNING" })), true);
+  for (const status of ["SUCCEEDED", "FAILED", "CANCELLED"] as const) assert.equal(isJobActive(job({ status })), false);
+});
+
+test("job failures are explained without technical codes and reassure that nothing changed", () => {
+  for (const code of ["SERVER_RESTARTED", "JOB_INTERRUPTED", "JOB_TIMEOUT", "EXTRACTION_FAILED"]) {
+    const text = jobErrorText(code);
+    assert.doesNotMatch(text, /[A-Z]{4,}_[A-Z]+/);
+    assert.match(text, /Nothing was changed/);
+  }
+  assert.match(jobErrorText(null), /Nothing was changed/);
+  assert.match(jobErrorText("CANCELLED_BY_OWNER"), /cancelled/);
 });
