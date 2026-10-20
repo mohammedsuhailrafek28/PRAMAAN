@@ -134,6 +134,16 @@ export const openApiSpec = {
           },
           durationDays: { type: "integer", example: 7 }
         }
+      },
+      TrustConclusionRequest: {
+        oneOf: [
+          { type: "object", additionalProperties: false, required: ["kind", "field"], properties: { kind: { type: "string", enum: ["FIELD_SUPPORTED_BY_EVIDENCE", "FIELD_NOT_CONTRADICTED"] }, field: { type: "string", enum: ["legalBusinessName", "ownerName", "gstin", "udyamNumber", "address", "turnoverBand", "summary"] } } },
+          { type: "object", additionalProperties: false, required: ["kind", "docType"], properties: { kind: { type: "string", enum: ["EVIDENCE_CURRENT"] }, docType: { type: "string", enum: ["GST_CERTIFICATE", "UDYAM_CERTIFICATE", "BANK_STATEMENT"] } } }
+        ]
+      },
+      TrustConclusionResponse: {
+        type: "object",
+        example: { conclusion: { result: "CONFIRMED", basis: "INTERNAL_DETERMINISTIC_CHECKS", passportVersion: 1, scopeLimited: true, limitations: ["No external source was consulted; this is a deterministic internal assessment."] } }
       }
     },
     responses: {
@@ -798,6 +808,35 @@ export const openApiSpec = {
         summary: "Fetch authenticated user's notifications",
         security: [{ bearerAuth: [] }],
         responses: { "200": { description: "Notifications" } }
+      }
+    },
+    "/api/trust-view/{consentRequestId}/conclusions": {
+      post: {
+        tags: ["Evidence Decision Firewall"],
+        summary: "Evaluate a coarse conclusion against a registered consent's pinned snapshot",
+        description: "Server derives identity, consent, assurance, approved scope and Passport snapshot. The response never contains values, evidence IDs, hidden reason codes or raw documents. Denied valid requests return the same NOT_DISCLOSABLE result.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "consentRequestId", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/TrustConclusionRequest" } } } },
+        responses: {
+          "200": { description: "Coarse conclusion", content: { "application/json": { schema: { $ref: "#/components/schemas/TrustConclusionResponse" } } } },
+          "400": { $ref: "#/components/responses/ValidationError" },
+          "503": { description: "Firewall unavailable", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/api/public/verify/{token}/conclusions": {
+      post: {
+        tags: ["Evidence Decision Firewall"],
+        summary: "Evaluate a coarse conclusion against a guest grant's pinned snapshot",
+        description: "The guest token is the only credential. The token is never returned or echoed by this route, and the response never contains raw evidence or hidden reason codes.",
+        parameters: [{ name: "token", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/TrustConclusionRequest" } } } },
+        responses: {
+          "200": { description: "Coarse conclusion", content: { "application/json": { schema: { $ref: "#/components/schemas/TrustConclusionResponse" } } } },
+          "400": { $ref: "#/components/responses/ValidationError" },
+          "503": { description: "Firewall unavailable", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } }
+        }
       }
     }
   }

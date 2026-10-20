@@ -3,7 +3,7 @@ import { ZodError } from "zod";
 import { ApiError } from "../utils/apiError.js";
 
 export function notFoundHandler(req: Request, _res: Response, next: NextFunction) {
-  next(new ApiError(404, "NOT_FOUND", `Route not found: ${req.method} ${req.path}`));
+  next(new ApiError(404, "NOT_FOUND", "Not found."));
 }
 
 export function errorHandler(
@@ -27,7 +27,15 @@ export function errorHandler(
     });
   }
 
-  console.error(err);
+  const parserError = err as Error & { type?: string; status?: number };
+  if (parserError.type === "entity.too.large" || parserError.status === 413) {
+    return res.status(413).json({ error: { code: "PAYLOAD_TOO_LARGE", message: "Request body is too large." } });
+  }
+  if (err instanceof SyntaxError && "body" in err) {
+    return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Malformed JSON request body." } });
+  }
+
+  console.error("Unhandled request error", { name: err.name });
   return res.status(500).json({
     error: { code: "INTERNAL_SERVER_ERROR", message: "Something went wrong." }
   });

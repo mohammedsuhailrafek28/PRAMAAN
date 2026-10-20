@@ -1,9 +1,10 @@
 import { Router } from "express";
-import { z } from "zod";
 import { requireAuth } from "../../middleware/auth.js";
 import { validate } from "../../middleware/validate.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import * as controller from "./accessGrant.controller.js";
+import { guestConclusionRateLimit, guestIpConclusionRateLimit } from "../evidenceFirewall/firewall-rate-limit.js";
+import { z } from "zod";
 
 const router = Router();
 const scope = z.object({ fields: z.array(z.string()).default([]), evidenceTypes: z.array(z.string()).default([]) });
@@ -19,4 +20,10 @@ router.patch("/:id/revoke", requireAuth, validate({ params }), asyncHandler(cont
 
 export const guestRouter = Router();
 guestRouter.get("/:token", asyncHandler(controller.guest));
+const conclusion = z.union([
+  z.object({ kind: z.literal("FIELD_SUPPORTED_BY_EVIDENCE"), field: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("FIELD_NOT_CONTRADICTED"), field: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("EVIDENCE_CURRENT"), docType: z.string().min(1) }).strict()
+]);
+guestRouter.post("/:token/conclusions", guestIpConclusionRateLimit, guestConclusionRateLimit, validate({ body: conclusion }), asyncHandler(controller.conclusions));
 export default router;

@@ -1,0 +1,2 @@
+-- SQLite stores Prisma enums as text. This migration records the additive
+-- CONCLUSION_EVALUATED audit vocabulary for deployment and migration history.
