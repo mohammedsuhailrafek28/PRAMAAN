@@ -8,14 +8,17 @@ export type DocumentIssueState = "MISSING" | "EXPIRED" | "UNREADABLE" | "UNSUPPO
 export type CorrectableClaim = "legalName" | "gstin" | "pan" | "udyamNumber";
 export type CorrectionSource = "DOCUMENT_TEXT" | "GSTIN_EMBEDDED_PAN" | "ACCOUNT_ORGANIZATION_NAME";
 
-export interface ReviewField { field: string; status: "EXTRACTED" | "AMBIGUOUS" | "MALFORMED" | "NOT_FOUND"; displayValue: string | null; page: number | null; line: number | null; confidence: number; note: string | null }
-export interface ReviewDocument { documentId: string; docType: string; originalName: string; revision: number; lifecycleState: string; extractionStatus: ExtractionStatus; extractionReason: string | null; pageCount: number; fields: ReviewField[] }
-export interface ReviewComparison { documentId: string; docType: string; sourceField: string; outcome: "MATCH" | "NEAR_MATCH" | "DIFFERENT" | "NOT_FOUND" | "UNREADABLE"; similarity: string | null; extractedDisplay: string | null; page: number | null; line: number | null; confidence: number }
-export interface ReviewReconciliation { claim: ReviewClaim; status: ReconciliationStatus; declaredDisplay: string | null; summary: string; crossDocumentConflict: boolean; comparisons: ReviewComparison[] }
+export type ReadMethod = "EMBEDDED_TEXT" | "OCR" | "MIXED" | "LEGACY_PDF_PARSER";
+export interface ReviewField { field: string; status: "EXTRACTED" | "AMBIGUOUS" | "MALFORMED" | "NOT_FOUND"; displayValue: string | null; page: number | null; line: number | null; confidence: number; note: string | null; method: ReadMethod; region: [number, number, number, number] | null; needsReview: boolean; reviewReasons: string[] }
+export interface ReviewTablePreviewRow { page: number; date: string | null; description: string; debit: number | null; credit: number | null; balance: number | null; balanceCheck: "PASSED" | "FAILED" | "NOT_APPLICABLE"; confidence: number }
+export interface ReviewTable { rowCount: number; balanceChecked: number; balanceConsistent: number; reliable: boolean; preview: ReviewTablePreviewRow[] }
+export interface ReviewDocument { documentId: string; docType: string; originalName: string; revision: number; lifecycleState: string; extractionStatus: ExtractionStatus; extractionReason: string | null; pageCount: number; engine: "HYBRID" | "LEGACY"; ocrPages: number; needsReview: boolean; pages: Array<{ page: number; method: string; ocrConfidence: number | null; rotationDegrees: number | null }>; table: ReviewTable | null; fields: ReviewField[] }
+export interface ReviewComparison { documentId: string; docType: string; sourceField: string; outcome: "MATCH" | "NEAR_MATCH" | "DIFFERENT" | "NOT_FOUND" | "UNREADABLE" | "UNCERTAIN"; similarity: string | null; extractedDisplay: string | null; page: number | null; line: number | null; confidence: number; method: ReadMethod; needsReview: boolean }
+export interface ReviewReconciliation { claim: ReviewClaim; status: ReconciliationStatus; declaredDisplay: string | null; summary: string; crossDocumentConflict: boolean; needsOwnerReview: boolean; comparisons: ReviewComparison[] }
 export interface SubmitAction { id: string; type: "SUBMIT_DOCUMENT"; docType: string; reason: DocumentIssueState; resolves: string[]; resolution: "CONDITIONAL_ON_NEW_DOCUMENT_CONTENT"; requiresOwnerConfirmation: false }
 export interface CorrectAction { id: string; type: "CORRECT_CLAIM"; claim: CorrectableClaim; sourceDocumentId: string | null; source: CorrectionSource; proposedDisplay: string | null; resolves: string[]; resolution: "VERIFIED_BY_RULES"; requiresOwnerConfirmation: true }
 export type ReviewAction = SubmitAction | CorrectAction;
-export interface UnresolvedItem { issueId: string; reason: "NEEDS_HUMAN_REVIEW" | "DOCUMENTS_DISAGREE" | "NOT_SUPPORTED_BY_DESIGN"; message: string }
+export interface UnresolvedItem { issueId: string; reason: "READING_UNCERTAIN" | "NEEDS_HUMAN_REVIEW" | "DOCUMENTS_DISAGREE" | "NOT_SUPPORTED_BY_DESIGN"; message: string }
 export interface ReviewBenchmark { fullPackDocuments: number; outstandingOnlyDocuments: number; plannedDocuments: number; plannedOwnerActions: number; openIssues: number; issuesClosedByPlan: number; issuesAddressedByOutstandingOnly: number; issuesAddressedByFullPack: number }
 export interface EvidenceReview {
   generatedAt: string;
@@ -29,7 +32,23 @@ export interface EvidenceReview {
 
 export const CLAIM_LABEL: Record<ReviewClaim, string> = { legalName: "Legal business name", gstin: "GSTIN", pan: "PAN", udyamNumber: "Udyam number", bankAccount: "Bank account" };
 export const DOC_LABEL: Record<string, string> = { GST_CERTIFICATE: "GST certificate", UDYAM_CERTIFICATE: "Udyam certificate", BANK_STATEMENT: "Bank statement" };
-export const FIELD_LABEL: Record<string, string> = { legalName: "Legal name", gstin: "GSTIN", pan: "PAN", udyamNumber: "Udyam number", enterpriseName: "Enterprise name", accountHolderName: "Account holder", accountNumber: "Account number", ifsc: "IFSC" };
+export const FIELD_LABEL: Record<string, string> = { legalName: "Legal name", gstin: "GSTIN", pan: "PAN", udyamNumber: "Udyam number", enterpriseName: "Enterprise name", accountHolderName: "Account holder", accountNumber: "Account number", ifsc: "IFSC", tradeName: "Trade name", registrationDate: "Registration date", enterpriseType: "Enterprise type", bankName: "Bank", statementPeriod: "Statement period" };
+
+export const METHOD_LABEL: Record<ReadMethod, string> = { EMBEDDED_TEXT: "Read from the file's text", OCR: "Read from a scan (OCR)", MIXED: "Read from text and scan", LEGACY_PDF_PARSER: "Read with the basic text reader" };
+
+/** Plain-language reasons a value needs the owner's eyes. Unknown codes fall back to a generic line. */
+export const REVIEW_REASON: Record<string, string> = {
+  OCR_IDENTIFIER: "Read from a scan; check every character of this number.",
+  OCR_LOW_CONFIDENCE: "The scan was hard to read here.",
+  OCR_REPAIRED: "One or more characters looked unclear and were adjusted to fit the number's format. Please check it.",
+  LOW_CONFIDENCE: "Pramaan is not confident about this reading.",
+  NO_LABEL: "Found without its usual label.",
+  MULTIPLE_CANDIDATES: "More than one different value was found.",
+  FAILED_VALIDATION: "Does not match the expected format.",
+  CHECKSUM_FAILED: "The number's built-in check did not pass.",
+  INCONSISTENT_WITH_GSTIN: "Does not agree with the PAN inside the GSTIN.",
+};
+export const reviewReasonText = (code: string) => REVIEW_REASON[code] ?? "Please check this value against your document.";
 
 export type Tone = "positive" | "info" | "neutral" | "warning" | "negative";
 export interface Descriptor { label: string; tone: Tone; description: string }
@@ -45,8 +64,8 @@ export const EXTRACTION: Record<ExtractionStatus, Descriptor> = {
   EXTRACTED: { label: "Read", tone: "positive", description: "All expected fields were read from the file's text." },
   PARTIAL: { label: "Partly read", tone: "warning", description: "Some fields could not be read clearly." },
   NOT_RECOGNISED: { label: "Not recognised", tone: "warning", description: "The file does not look like this type of document." },
-  UNREADABLE: { label: "Couldn't read", tone: "warning", description: "No usable text was found. Scanned images cannot be read (there is no OCR)." },
-  UNSUPPORTED: { label: "Unsupported file", tone: "neutral", description: "Only text-based, unencrypted PDFs can be read." },
+  UNREADABLE: { label: "Couldn't read", tone: "warning", description: "No usable text could be read, even from a scan. Try a clearer, upright copy." },
+  UNSUPPORTED: { label: "Unsupported file", tone: "neutral", description: "Only unencrypted PDFs (text or scanned) can be read." },
   REJECTED: { label: "Rejected as unsafe", tone: "negative", description: "The file exceeded safe processing limits and was not read." },
 };
 
@@ -56,7 +75,7 @@ export const DOC_SENTENCE: Record<string, string> = { GST_CERTIFICATE: "GST cert
 const DOC_REASON: Record<DocumentIssueState, string> = {
   MISSING: "not uploaded yet",
   EXPIRED: "past its expiry date",
-  UNREADABLE: "unreadable (it may be a scan or an image)",
+  UNREADABLE: "unreadable (try a clearer, upright copy)",
   UNSUPPORTED: "not a readable text PDF",
   REJECTED_FILE: "rejected as unsafe to process",
   NOT_RECOGNISED: "not recognised as this type of document",
@@ -81,6 +100,7 @@ export function actionDetail(action: ReviewAction): string {
 export function issueLabel(id: string): string {
   if (id.startsWith("DOC:")) return `${DOC_LABEL[id.slice(4)] ?? id.slice(4)} evidence`;
   if (id.startsWith("CONFLICT:")) return `${CLAIM_LABEL[id.slice(9) as ReviewClaim] ?? id.slice(9)} conflict`;
+  if (id.startsWith("REVIEW:")) return `${CLAIM_LABEL[id.slice(7) as ReviewClaim] ?? id.slice(7)} reading`;
   if (id === "GAP:bankAccount") return "Structured bank-account claim";
   return id;
 }

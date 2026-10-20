@@ -2,6 +2,8 @@
 
 Branch `feature/horizon-evidence-intelligence`, based on `finals/main @ 05532f2`. Not merged, pushed or deployed.
 
+> **Update:** document reading was later extended (scans, OCR, rotated and mixed pages, bank tables). The "no OCR" statements below describe the original text-only parser, which is now the fallback; see [HORIZON_DOCUMENT_INTELLIGENCE.md](HORIZON_DOCUMENT_INTELLIGENCE.md) for the current pipeline.
+
 Pramaan now reads the text of the PDFs an MSME uploaded, compares it with what the MSME declared, and computes the
 smallest set of owner actions that closes the open issues. **Reading a document is not authenticating it.** No external
 source is consulted and no external AI service is used.

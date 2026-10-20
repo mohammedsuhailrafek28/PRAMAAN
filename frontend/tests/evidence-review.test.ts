@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { RECONCILIATION, EXTRACTION, actionDetail, actionTitle, benchmarkSentence, issueLabel, type CorrectAction, type EvidenceReview, type SubmitAction } from "../src/lib/evidenceReview.ts";
+import { RECONCILIATION, EXTRACTION, METHOD_LABEL, reviewReasonText, actionDetail, actionTitle, benchmarkSentence, issueLabel, type CorrectAction, type EvidenceReview, type SubmitAction } from "../src/lib/evidenceReview.ts";
 
 const submit: SubmitAction = { id: "SUBMIT:UDYAM_CERTIFICATE", type: "SUBMIT_DOCUMENT", docType: "UDYAM_CERTIFICATE", reason: "EXPIRED", resolves: ["DOC:UDYAM_CERTIFICATE"], resolution: "CONDITIONAL_ON_NEW_DOCUMENT_CONTENT", requiresOwnerConfirmation: false };
 const correct: CorrectAction = { id: "CORRECT:pan", type: "CORRECT_CLAIM", claim: "pan", sourceDocumentId: "d1", source: "DOCUMENT_TEXT", proposedDisplay: "AB******4F", resolves: ["CONFLICT:pan"], resolution: "VERIFIED_BY_RULES", requiresOwnerConfirmation: true };
@@ -30,6 +30,14 @@ test("issue labels are human readable", () => {
   assert.equal(issueLabel("DOC:BANK_STATEMENT"), "Bank statement evidence");
   assert.equal(issueLabel("CONFLICT:gstin"), "GSTIN conflict");
   assert.equal(issueLabel("GAP:bankAccount"), "Structured bank-account claim");
+});
+
+test("uncertain readings get plain-language labels and never read as conflicts", () => {
+  assert.equal(issueLabel("REVIEW:gstin"), "GSTIN reading");
+  assert.match(reviewReasonText("OCR_REPAIRED"), /adjusted to fit/);
+  assert.match(reviewReasonText("SOMETHING_NEW"), /check this value/i);
+  assert.equal(METHOD_LABEL.OCR, "Read from a scan (OCR)");
+  assert.doesNotMatch(EXTRACTION.UNREADABLE.description, /no OCR/i);
 });
 
 test("benchmark sentence reports all three counts honestly", () => {

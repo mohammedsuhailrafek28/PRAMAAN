@@ -28,13 +28,14 @@ export type DocumentIssueState = "MISSING" | "EXPIRED" | "UNREADABLE" | "UNSUPPO
 export type Issue =
   | { id: string; kind: "DOCUMENT"; docType: DocumentType; state: DocumentIssueState }
   | { id: string; kind: "CLAIM_CONFLICT"; claim: CorrectableClaim; engineContradiction: boolean }
+  | { id: string; kind: "UNCERTAIN_READING"; claim: CorrectableClaim }
   | { id: string; kind: "BANK_ACCOUNT_CLAIM_UNSUPPORTED" };
 
 export type PlanAction =
   | { id: string; type: "SUBMIT_DOCUMENT"; docType: DocumentType; reason: DocumentIssueState; resolves: string[]; resolution: "CONDITIONAL_ON_NEW_DOCUMENT_CONTENT"; requiresOwnerConfirmation: false }
   | { id: string; type: "CORRECT_CLAIM"; claim: CorrectableClaim; sourceDocumentId: string | null; source: "DOCUMENT_TEXT" | "GSTIN_EMBEDDED_PAN" | "ACCOUNT_ORGANIZATION_NAME"; proposedValue: string; resolves: string[]; resolution: "VERIFIED_BY_RULES"; requiresOwnerConfirmation: true };
 
-export type UnresolvedReason = "NEEDS_HUMAN_REVIEW" | "DOCUMENTS_DISAGREE" | "NOT_SUPPORTED_BY_DESIGN";
+export type UnresolvedReason = "READING_UNCERTAIN" | "NEEDS_HUMAN_REVIEW" | "DOCUMENTS_DISAGREE" | "NOT_SUPPORTED_BY_DESIGN";
 export type UnresolvedItem = { issueId: string; reason: UnresolvedReason; message: string };
 
 export type Benchmark = {
@@ -111,6 +112,13 @@ function openIssues(ctx: Context): State {
     if (claim) conflicts.set(claim, true);
   }
   const issues: Issue[] = [];
+  // A value that differs from the declaration but was read uncertainly (OCR, failed check) is never a conflict and never a
+  // correction source: the owner is asked to look at it instead.
+  for (const item of reconciliations) {
+    if (item.needsOwnerReview && !conflicts.has(item.claim as CorrectableClaim) && (CORRECTABLE_CLAIMS as readonly string[]).includes(item.claim)) {
+      issues.push({ id: `REVIEW:${item.claim}`, kind: "UNCERTAIN_READING", claim: item.claim as CorrectableClaim });
+    }
+  }
   for (const docType of requiredDocumentTypes) {
     const state = documentState(docType, ctx);
     if (state) issues.push({ id: `DOC:${docType}`, kind: "DOCUMENT", docType, state });
@@ -145,7 +153,7 @@ function correctionCandidates(claim: CorrectableClaim, ctx: Context, reconciliat
     out.push(candidate);
   };
   for (const comparison of reconciliation?.comparisons ?? []) {
-    if (comparison.extractedValue) add({ claim, value: comparison.extractedValue, sourceDocumentId: comparison.documentId, source: "DOCUMENT_TEXT" });
+    if (comparison.extractedValue && !comparison.needsReview) add({ claim, value: comparison.extractedValue, sourceDocumentId: comparison.documentId, source: "DOCUMENT_TEXT" });
   }
   if (claim === "pan") {
     const embedded = panFromGstin(ctx.business.gstin);
@@ -243,6 +251,8 @@ export function planEvidenceChallenge(input: PlannerInput): { issues: Issue[]; r
     else if (issue?.kind === "CLAIM_CONFLICT") {
       const disagree = initial.reconciliations.find((item) => item.claim === issue.claim)?.crossDocumentConflict;
       unresolved.push({ issueId: id, reason: disagree ? "DOCUMENTS_DISAGREE" : "NEEDS_HUMAN_REVIEW", message: disagree ? "Your submitted documents disagree with each other, so no single correction to your declaration reconciles them. Upload a corrected document or request human review." : "No single correction to your declaration removes this conflict under the trust rules. Request human review or upload a corrected document." });
+    } else if (issue?.kind === "UNCERTAIN_READING") {
+      unresolved.push({ issueId: id, reason: "READING_UNCERTAIN", message: "A value in your document was read with low certainty and may not match what you declared. Check the document yourself; nothing is changed automatically. Uploading a clearer copy may help." });
     } else if (issue?.kind === "DOCUMENT") unresolved.push({ issueId: id, reason: "NEEDS_HUMAN_REVIEW", message: "This document issue is not closed by the planned actions." });
     else if (!issue) unresolved.push({ issueId: id, reason: "NEEDS_HUMAN_REVIEW", message: "Applying the planned corrections would introduce a new conflict that needs review." });
   }

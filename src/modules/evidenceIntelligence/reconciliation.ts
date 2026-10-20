@@ -5,11 +5,11 @@
 // "MATCHED" means the document text agrees with the declaration; it does not mean either is true or government-verified.
 
 import type { DocumentType } from "@prisma/client";
-import type { DocumentExtraction, ExtractedField, ExtractedFieldName } from "./field-extractors.js";
+import type { DocumentExtraction, ExtractedField, ExtractedFieldName, ExtractionMethod } from "./field-extractors.js";
 
 export type ReconciledClaim = "legalName" | "gstin" | "pan" | "udyamNumber" | "bankAccount";
 export type ReconciliationStatus = "MATCHED" | "CONFLICTED" | "INSUFFICIENT" | "UNREADABLE";
-export type ComparisonOutcome = "MATCH" | "NEAR_MATCH" | "DIFFERENT" | "NOT_FOUND" | "UNREADABLE";
+export type ComparisonOutcome = "MATCH" | "NEAR_MATCH" | "DIFFERENT" | "NOT_FOUND" | "UNREADABLE" | "UNCERTAIN";
 export type Similarity = "EXACT" | "NORMALIZED" | "NEAR" | "DIFFERENT";
 
 export type DeclaredClaims = { legalName: string | null; gstin: string | null; pan: string | null; udyamNumber: string | null };
@@ -25,6 +25,9 @@ export type Comparison = {
   page: number | null;
   line: number | null;
   confidence: number;
+  /** The extracted value is an uncertain reading (OCR, failed check, ambiguity) and must not drive a conflict or a correction. */
+  needsReview: boolean;
+  method: ExtractionMethod;
 };
 
 export type ClaimReconciliation = {
@@ -34,6 +37,8 @@ export type ClaimReconciliation = {
   comparisons: Comparison[];
   /** Extracted documents disagree among themselves (distinct values) regardless of the declaration. */
   crossDocumentConflict: boolean;
+  /** A document value differs from the declaration but was read too uncertainly to call it a conflict. */
+  needsOwnerReview: boolean;
   summary: string;
 };
 
@@ -90,11 +95,18 @@ function editDistance(a: string, b: string): number {
   return previous[b.length];
 }
 
+/** Whitespace-free comparison form: handles OCR output where words run together ("SunriseTextilesPrivateLimited"). */
+function compactName(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9&]/g, "").replace(/(PRIVATELIMITED|PRIVATELTD|PVTLIMITED|PVTLTD)$/, "PVTLTD").replace(/LIMITED$/, "LTD");
+}
+
 export function compareNames(declared: string, extracted: string): Similarity {
   if (declared.trim().toUpperCase() === extracted.trim().toUpperCase()) return "EXACT";
   const a = normalizeNameForComparison(declared);
   const b = normalizeNameForComparison(extracted);
   if (a === b && a.length > 0) return "NORMALIZED";
+  // OCR often drops the spaces between words; comparison ignores whitespace entirely (the stored claim is never touched).
+  if (a.length > 0 && compactName(declared) === compactName(extracted)) return "NORMALIZED";
   const longest = Math.max(a.length, b.length);
   if (longest > 0 && longest <= 200 && 1 - editDistance(a, b) / longest >= 0.85) return "NEAR";
   return "DIFFERENT";
@@ -117,6 +129,7 @@ function outcomeFor(claim: ReconciledClaim, declared: string, field: ExtractedFi
   if (field.status !== "EXTRACTED" || field.value === null) return { outcome: field.status === "NOT_FOUND" ? "NOT_FOUND" : "UNREADABLE", similarity: null };
   const similarity = claim === "legalName" ? compareNames(declared, field.value) : compareIdentifier(declared, field.value);
   if (similarity === "EXACT" || similarity === "NORMALIZED") return { outcome: "MATCH", similarity };
+  if (field.needsReview) return { outcome: "UNCERTAIN", similarity };
   return { outcome: similarity === "NEAR" ? "NEAR_MATCH" : "DIFFERENT", similarity };
 }
 
@@ -131,15 +144,16 @@ function reconcileClaim(claim: Exclude<ReconciledClaim, "bankAccount">, declared
       const field = extraction.fields.find((item) => item.field === source.field);
       if (!field) {
         documentUnreadable = true;
-        comparisons.push({ documentId: extraction.documentId, docType: source.docType, sourceField: source.field, outcome: "UNREADABLE", similarity: null, extractedValue: null, page: null, line: null, confidence: 0 });
+        comparisons.push({ documentId: extraction.documentId, docType: source.docType, sourceField: source.field, outcome: "UNREADABLE", similarity: null, extractedValue: null, page: null, line: null, confidence: 0, needsReview: false, method: "EMBEDDED_TEXT" });
         continue;
       }
       const { outcome, similarity } = trimmed ? outcomeFor(claim, trimmed, field) : { outcome: field.status === "EXTRACTED" ? ("MATCH" as const) : field.status === "NOT_FOUND" ? ("NOT_FOUND" as const) : ("UNREADABLE" as const), similarity: null };
-      if (outcome === "UNREADABLE") documentUnreadable = true;
-      comparisons.push({ documentId: extraction.documentId, docType: source.docType, sourceField: source.field, outcome: trimmed ? outcome : outcome === "MATCH" ? "NOT_FOUND" : outcome, similarity, extractedValue: field.value, page: field.page, line: field.line, confidence: field.confidence });
+      if (outcome === "UNREADABLE" || outcome === "UNCERTAIN") documentUnreadable = true;
+      comparisons.push({ documentId: extraction.documentId, docType: source.docType, sourceField: source.field, outcome: trimmed ? outcome : outcome === "MATCH" ? "NOT_FOUND" : outcome, similarity, extractedValue: field.value, page: field.page, line: field.line, confidence: field.confidence, needsReview: field.needsReview, method: field.method });
     }
   }
-  const extracted = comparisons.filter((item) => item.extractedValue !== null);
+  // Only certain readings can make documents disagree with each other.
+  const extracted = comparisons.filter((item) => item.extractedValue !== null && !item.needsReview);
   const distinctExtracted = new Set(extracted.map((item) => (claim === "legalName" ? normalizeNameForComparison(item.extractedValue) : identifier(item.extractedValue))));
   let crossDocumentConflict = distinctExtracted.size > 1;
   if (claim === "pan") {
@@ -150,7 +164,8 @@ function reconcileClaim(claim: Exclude<ReconciledClaim, "bankAccount">, declared
       if (gstin && pan && gstin.slice(2, 12) !== pan) crossDocumentConflict = true;
     }
   }
-  const base = { claim, declaredValue: trimmed, comparisons, crossDocumentConflict };
+  const needsOwnerReview = comparisons.some((item) => item.outcome === "UNCERTAIN");
+  const base = { claim, declaredValue: trimmed, comparisons, crossDocumentConflict, needsOwnerReview };
 
   if (!trimmed) return { ...base, status: extracted.length > 0 ? "INSUFFICIENT" : documentUnreadable ? "UNREADABLE" : "INSUFFICIENT", summary: "No declared value to compare against." };
   if (comparisons.some((item) => item.outcome === "DIFFERENT" || item.outcome === "NEAR_MATCH")) {
@@ -159,6 +174,7 @@ function reconcileClaim(claim: Exclude<ReconciledClaim, "bankAccount">, declared
   }
   if (crossDocumentConflict) return { ...base, status: "CONFLICTED", summary: "Submitted documents disagree with each other." };
   if (comparisons.some((item) => item.outcome === "MATCH")) return { ...base, status: "MATCHED", summary: "Document text agrees with the declaration. This is not source verification." };
+  if (needsOwnerReview) return { ...base, status: "UNREADABLE", summary: "A document value could not be read reliably and may differ from the declaration. Please check it." };
   if (documentUnreadable) return { ...base, status: "UNREADABLE", summary: "A relevant document could not be read well enough to compare." };
   return { ...base, status: "INSUFFICIENT", summary: documentSeen ? "A relevant document was read but did not contain this value." : "No relevant document has been submitted." };
 }
@@ -168,7 +184,7 @@ function reconcileBank(extractions: DocumentExtraction[]): ClaimReconciliation {
   const number = banks.flatMap((item) => item.fields).find((item) => item.field === "accountNumber" && item.status === "EXTRACTED");
   const unreadable = banks.some((item) => item.status === "UNREADABLE" || item.status === "UNSUPPORTED" || item.status === "REJECTED" || item.status === "NOT_RECOGNISED");
   const comparisons: Comparison[] = number
-    ? [{ documentId: number.documentId, docType: "BANK_STATEMENT", sourceField: "accountNumber", outcome: "NOT_FOUND", similarity: null, extractedValue: number.value, page: number.page, line: number.line, confidence: number.confidence }]
+    ? [{ documentId: number.documentId, docType: "BANK_STATEMENT", sourceField: "accountNumber", outcome: "NOT_FOUND", similarity: null, extractedValue: number.value, page: number.page, line: number.line, confidence: number.confidence, needsReview: number.needsReview, method: number.method }]
     : [];
   return {
     claim: "bankAccount",
@@ -176,6 +192,7 @@ function reconcileBank(extractions: DocumentExtraction[]): ClaimReconciliation {
     declaredValue: null,
     comparisons,
     crossDocumentConflict: false,
+    needsOwnerReview: false,
     summary: number ? "An account number was read from the statement, but Pramaan holds no declared bank-account claim to compare it with." : unreadable ? "The bank statement could not be read well enough to extract an account number." : "No bank statement has been submitted."
   };
 }

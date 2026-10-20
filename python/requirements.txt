@@ -1,0 +1,6 @@
+# Runtime dependencies of the evidence worker (python/evidence_worker). Pin exact versions in production images.
+# Tested with Python 3.12.
+pymupdf==1.26.3
+rapidocr-onnxruntime==1.4.4
+numpy>=2.0,<3
+pillow>=11

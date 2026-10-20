@@ -13,6 +13,8 @@
     "reliability": "tsx scripts/reliability-tests.ts",
     "test:snapshot": "tsx scripts/snapshot-integrity-tests.mts",
     "test:evidence-intelligence": "tsx scripts/evidence-intelligence-tests.ts && tsx scripts/evidence-intelligence-api-tests.ts",
+    "test:evidence-hybrid": "tsx scripts/evidence-hybrid-tests.ts && tsx scripts/evidence-ocr-api-tests.ts",
+    "benchmark:evidence": "tsx scripts/evidence-benchmark.mts",
     "test:security": "tsx scripts/security-hardening-tests.ts",
     "test:identity-assurance": "tsx scripts/identity-assurance-tests.ts",
     "test:evidence-revisions": "tsx scripts/evidence-revision-integrity-tests.ts",

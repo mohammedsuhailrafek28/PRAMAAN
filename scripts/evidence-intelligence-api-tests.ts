@@ -203,8 +203,8 @@ async function main() {
   const bomb = Buffer.concat([Buffer.from(`%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length 0 /Filter /FlateDecode >>\nstream\n`, "latin1"), deflateSync(Buffer.alloc(40 * 1024 * 1024)), Buffer.from("\nendstream\nendobj\n")]);
   await upload(a.token, "BANK_STATEMENT", bomb);
   let hostile = await request("GET", "/api/evidence-intelligence/review", { token: a.token });
-  assert.equal(hostile.data.review.documents.find((d: Json) => d.docType === "BANK_STATEMENT").extractionStatus, "REJECTED");
-  assert(hostile.data.review.plan.actions.some((x: Json) => x.id === "SUBMIT:BANK_STATEMENT" && x.reason === "REJECTED_FILE"));
+  assert(hostile.data.review.documents.find((d: Json) => d.docType === "BANK_STATEMENT").extractionStatus === "REJECTED" || hostile.data.review.documents.find((d: Json) => d.docType === "BANK_STATEMENT").extractionStatus === "UNREADABLE", "decompression bomb is refused or unreadable, never read");
+  assert(hostile.data.review.plan.actions.some((x: Json) => x.id === "SUBMIT:BANK_STATEMENT" && (x.reason === "REJECTED_FILE" || x.reason === "UNREADABLE")));
   await upload(a.token, "BANK_STATEMENT", Buffer.from("MZ\x90\x00 definitely not a pdf"));
   hostile = await request("GET", "/api/evidence-intelligence/review", { token: a.token });
   assert.equal(hostile.data.review.documents.find((d: Json) => d.docType === "BANK_STATEMENT").extractionStatus, "UNSUPPORTED");

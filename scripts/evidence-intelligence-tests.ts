@@ -345,6 +345,53 @@ test("the planner never mutates its inputs", () => {
   assert.equal(JSON.stringify([b, ALL_DOCS()]), snapshot);
 });
 
+// ------------------------------------------------------------------ uncertain (OCR) readings
+const ocrGst = (changes: { legalName?: string; gstin?: string }): DocumentExtraction => {
+  const base = extract("GST_CERTIFICATE", gstPdf());
+  return {
+    ...base, engine: "HYBRID", needsReview: true,
+    fields: base.fields.map((field) => {
+      const value = field.field === "legalName" ? changes.legalName : field.field === "gstin" ? changes.gstin : undefined;
+      return value === undefined ? field : { ...field, value, method: "OCR" as const, needsReview: true, reviewReasons: ["OCR_IDENTIFIER"], confidence: 0.7 };
+    })
+  };
+};
+
+test("OCR dropping spaces between words still matches the declared name (comparison only)", () => {
+  const result = reconcileClaims({ legalName: NAME, gstin: GSTIN, pan: PAN, udyamNumber: UDYAM }, [ocrGst({ legalName: NAME.replace(/ /g, "") })]).find((item) => item.claim === "legalName");
+  assert.equal(result?.status, "MATCHED");
+  assert.equal(result?.comparisons[0].similarity, "NORMALIZED");
+});
+
+test("an uncertain reading that differs from the declaration is never reported as a conflict", () => {
+  const misread = GSTIN.slice(0, 14) + (GSTIN[14] === "1" ? "7" : "1");
+  const result = reconcileClaims({ legalName: NAME, gstin: GSTIN, pan: PAN, udyamNumber: UDYAM }, [ocrGst({ gstin: misread })]).find((item) => item.claim === "gstin");
+  assert.equal(result?.status, "UNREADABLE");
+  assert.equal(result?.needsOwnerReview, true);
+  assert.equal(result?.comparisons[0].outcome, "UNCERTAIN");
+});
+
+test("an uncertain reading never becomes a correction proposal; the owner is asked to check instead", () => {
+  const misread = GSTIN.slice(0, 14) + (GSTIN[14] === "1" ? "7" : "1");
+  const extractions = [ocrGst({ gstin: misread }), extract("UDYAM_CERTIFICATE", udyamPdf()), extract("BANK_STATEMENT", bankPdf())];
+  const result = plan(business(), ALL_DOCS(), extractions);
+  assert.equal(result.plan.actions.filter((action) => action.type === "CORRECT_CLAIM").length, 0);
+  assert.ok(result.issues.some((issue) => issue.id === "REVIEW:gstin" && issue.kind === "UNCERTAIN_READING"));
+  assert.ok(result.plan.unresolved.some((item) => item.issueId === "REVIEW:gstin" && item.reason === "READING_UNCERTAIN"));
+  assert.ok(!result.issues.some((issue) => issue.id === "CONFLICT:gstin"));
+});
+
+test("an uncertain reading that equals the declaration is a match (agreement, not correction)", () => {
+  const result = reconcileClaims({ legalName: NAME, gstin: GSTIN, pan: PAN, udyamNumber: UDYAM }, [ocrGst({ gstin: GSTIN })]).find((item) => item.claim === "gstin");
+  assert.equal(result?.status, "MATCHED");
+  assert.equal(result?.needsOwnerReview, false);
+});
+
+test("a certain reading that differs is still a conflict, so the review keeps its force", () => {
+  const result = reconcileClaims({ legalName: "Another Business Private Limited", gstin: GSTIN, pan: PAN, udyamNumber: UDYAM }, [extract("GST_CERTIFICATE", gstPdf())]).find((item) => item.claim === "legalName");
+  assert.equal(result?.status, "CONFLICTED");
+});
+
 console.log("\nEvidence-request benchmark (documents asked of the owner; lower is better)");
 console.table(rows);
 if (failures > 0) { console.error(`\n${failures} test(s) failed`); process.exit(1); }

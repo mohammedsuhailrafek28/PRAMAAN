@@ -8,7 +8,10 @@
 import type { DocumentType } from "@prisma/client";
 import { extractPdfText, type PdfPageText, type PdfReason } from "./pdf-text.js";
 
-export type ExtractedFieldName = "legalName" | "gstin" | "pan" | "udyamNumber" | "enterpriseName" | "accountHolderName" | "accountNumber" | "ifsc";
+export type ExtractedFieldName =
+  | "legalName" | "gstin" | "pan" | "udyamNumber" | "enterpriseName" | "accountHolderName" | "accountNumber" | "ifsc"
+  | "tradeName" | "registrationDate" | "enterpriseType" | "bankName" | "statementPeriod";
+export type ExtractionMethod = "EMBEDDED_TEXT" | "OCR" | "MIXED" | "LEGACY_PDF_PARSER";
 export type ExtractionFieldStatus = "EXTRACTED" | "AMBIGUOUS" | "MALFORMED" | "NOT_FOUND";
 export type ExtractionDocumentStatus = "EXTRACTED" | "PARTIAL" | "NOT_RECOGNISED" | "UNREADABLE" | "UNSUPPORTED" | "REJECTED";
 
@@ -16,24 +19,53 @@ export type ExtractedField = {
   documentId: string;
   field: ExtractedFieldName;
   status: ExtractionFieldStatus;
-  /** Internal only. Never serialise, log or notify this raw value; use the display value from the serializer. */
+  /**
+   * Internal only. Never serialise, log or notify this raw value; use the display value from the serializer.
+   * Account numbers are held ONLY in masked form (last four digits); the full number is discarded at extraction.
+   */
   value: string | null;
   page: number | null;
   line: number | null;
   confidence: number;
   note: string | null;
+  method: ExtractionMethod;
+  /** Bounding box [x0, y0, x1, y1] in points on the upright page, when known. */
+  region: [number, number, number, number] | null;
+  /** The owner must look at this value before anything relies on it. Such a value never drives a correction proposal. */
+  needsReview: boolean;
+  reviewReasons: string[];
+};
+
+export type TransactionRow = {
+  page: number; date: string | null; description: string; reference: string | null; debit: number | null; credit: number | null; balance: number | null;
+  balanceCheck: "PASSED" | "FAILED" | "NOT_APPLICABLE"; confidence: number; method: string; region: [number, number, number, number];
+};
+export type TransactionTable = {
+  rowCount: number; returnedRows: number; balanceChecked: number; balanceConsistent: number; reliable: boolean; openingBalance: number | null; columns: string[];
+  rows: TransactionRow[];
 };
 
 export type DocumentExtraction = {
   documentId: string;
   docType: DocumentType;
   status: ExtractionDocumentStatus;
-  reason: PdfReason | "TYPE_NOT_SUPPORTED" | "NOT_A_PDF" | "NOT_RECOGNISED" | null;
+  reason: string | null;
   fields: ExtractedField[];
   pageCount: number;
+  /** Which pipeline produced this result. */
+  engine: "HYBRID" | "LEGACY";
+  ocrPages: number;
+  /** Per-page methods and notes, for provenance (no text). */
+  pages: Array<{ page: number; method: string; columns: number; ocrConfidence: number | null; rotationDegrees: number | null; notes: string[] }>;
+  table: TransactionTable | null;
+  /** True when any value, or the document as a whole, needs the owner's eyes before it is relied on. */
+  needsReview: boolean;
+  elapsedMs: number | null;
 };
 
 export const SUPPORTED_EXTRACTION_TYPES: ReadonlySet<DocumentType> = new Set<DocumentType>(["GST_CERTIFICATE", "UDYAM_CERTIFICATE", "BANK_STATEMENT"]);
+
+const legacyDefaults = { method: "LEGACY_PDF_PARSER" as const, region: null, needsReview: false, reviewReasons: [] as string[] };
 
 const GSTIN = /\b(\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z])\b/g;
 const PAN = /\b([A-Z]{5}\d{4}[A-Z])\b/g;
@@ -71,13 +103,13 @@ function pick(documentId: string, field: ExtractedFieldName, candidates: Array<{
     if (!valid.has(normalised)) valid.set(normalised, candidate);
   }
   if (valid.size === 0) {
-    return { documentId, field, status: malformed ? "MALFORMED" : "NOT_FOUND", value: null, page: null, line: null, confidence: 0, note: malformed ? "A value was present but did not have the expected format." : null };
+    return { ...legacyDefaults, documentId, field, status: malformed ? "MALFORMED" : "NOT_FOUND", value: null, page: null, line: null, confidence: 0, note: malformed ? "A value was present but did not have the expected format." : null };
   }
   if (valid.size > 1) {
-    return { documentId, field, status: "AMBIGUOUS", value: null, page: null, line: null, confidence: 0, note: "More than one different value was found in this document." };
+    return { ...legacyDefaults, documentId, field, status: "AMBIGUOUS", value: null, page: null, line: null, confidence: 0, note: "More than one different value was found in this document." };
   }
   const [[value, where]] = [...valid.entries()];
-  return { documentId, field, status: "EXTRACTED", value, page: where.at.page, line: where.at.line, confidence: where.confidence, note: where.note ?? null };
+  return { ...legacyDefaults, documentId, field, status: "EXTRACTED", value, page: where.at.page, line: where.at.line, confidence: where.confidence, note: where.note ?? null };
 }
 
 function matches(lines: Located[], pattern: RegExp): Array<{ value: string; at: Located }> {
@@ -162,9 +194,9 @@ const MARKERS: Record<string, RegExp> = {
   BANK_STATEMENT: /STATEMENT OF ACCOUNT|ACCOUNT STATEMENT|BANK STATEMENT|\bIFSC\b/i
 };
 
-/** Extracts structured facts from one stored file. Never throws; never returns raw text. */
-export function extractDocument(input: { documentId: string; docType: DocumentType; mimeType: string; bytes: Buffer }): DocumentExtraction {
-  const base = { documentId: input.documentId, docType: input.docType, fields: [] as ExtractedField[], pageCount: 0 };
+/** The original dependency-free parser: text-based PDFs with simple fonts only. Kept as a lightweight fallback and as the benchmark baseline. Never throws; never returns raw text. */
+export function extractDocumentLegacy(input: { documentId: string; docType: DocumentType; mimeType: string; bytes: Buffer }): DocumentExtraction {
+  const base = { documentId: input.documentId, docType: input.docType, fields: [] as ExtractedField[], pageCount: 0, engine: "LEGACY" as const, ocrPages: 0, pages: [], table: null, needsReview: false, elapsedMs: null };
   if (!SUPPORTED_EXTRACTION_TYPES.has(input.docType)) return { ...base, status: "UNSUPPORTED", reason: "TYPE_NOT_SUPPORTED" };
   if (input.mimeType !== "application/pdf") return { ...base, status: "UNSUPPORTED", reason: "NOT_A_PDF" };
   const text = extractPdfText(input.bytes);
@@ -179,3 +211,6 @@ export function extractDocument(input: { documentId: string; docType: DocumentTy
   const complete = usable === fields.length && text.status === "OK";
   return { ...base, fields, status: usable === 0 ? "UNREADABLE" : complete ? "EXTRACTED" : "PARTIAL", reason: usable === 0 ? "NO_EXTRACTABLE_TEXT" : text.reason };
 }
+
+/** @deprecated name kept for the original callers and tests; use extractDocumentLegacy or the hybrid extractor. */
+export const extractDocument = extractDocumentLegacy;

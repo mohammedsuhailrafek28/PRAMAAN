@@ -13,7 +13,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { confirmEvidenceCorrection, getApiError, getEvidenceReview } from "@/services/api";
 import { NOT_EXTERNALLY_VERIFIED } from "@/lib/trustVocabulary";
 import {
-  CLAIM_LABEL, DOC_LABEL, EXTRACTION, FIELD_LABEL, RECONCILIATION, actionDetail, actionTitle, benchmarkSentence, issueLabel, sourceDocumentName,
+  CLAIM_LABEL, DOC_LABEL, EXTRACTION, FIELD_LABEL, METHOD_LABEL, RECONCILIATION, reviewReasonText, actionDetail, actionTitle, benchmarkSentence, issueLabel, sourceDocumentName,
   type CorrectAction, type EvidenceReview, type ReviewDocument, type ReviewReconciliation,
 } from "@/lib/evidenceReview";
 import { formatDateTime } from "@/lib/utils";
@@ -29,6 +29,13 @@ function DocumentCard({ document }: { document: ReviewDocument }) {
         </div>
         <StatusPill label={status.label} tone={status.tone} description={status.description} />
       </div>
+      {(document.ocrPages > 0 || document.engine === "LEGACY") && (
+        <p className="mt-2 text-xs text-slate-500">
+          {document.engine === "LEGACY"
+            ? "Read with the basic text reader because scan reading was unavailable; scanned pages cannot be read in this mode."
+            : `${document.ocrPages} of ${document.pageCount} page${document.pageCount === 1 ? "" : "s"} read from a scan on this server (nothing leaves it). Scans can be misread, so check the values marked below.`}
+        </p>
+      )}
       {document.fields.length > 0 ? (
         <dl className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
           {document.fields.map((field) => (
@@ -36,14 +43,40 @@ function DocumentCard({ document }: { document: ReviewDocument }) {
               <dt className="text-xs text-slate-500">{FIELD_LABEL[field.field] ?? field.field}</dt>
               <dd className="break-words text-sm text-slate-900">
                 {field.status === "EXTRACTED" ? field.displayValue : <span className="text-slate-500">{field.status === "AMBIGUOUS" ? "Unclear — more than one value found" : field.status === "MALFORMED" ? "Unclear — not in the expected format" : "Not found"}</span>}
-                {field.status === "EXTRACTED" && field.page !== null && <span className="ml-2 text-xs text-slate-500">page {field.page}, line {field.line}</span>}
+                {field.status === "EXTRACTED" && field.page !== null && <span className="ml-2 text-xs text-slate-500">page {field.page}{field.line !== null ? `, line ${field.line}` : ""}</span>}
               </dd>
+              {field.status === "EXTRACTED" && field.method !== "LEGACY_PDF_PARSER" && <p className="text-xs text-slate-500">{METHOD_LABEL[field.method]}</p>}
+              {field.needsReview && (
+                <p className="text-xs text-warning" role="note"><strong className="font-medium">Check this value.</strong> {field.reviewReasons.map(reviewReasonText).filter((line, index, all) => all.indexOf(line) === index).join(" ")}</p>
+              )}
               {field.note && <p className="text-xs text-warning">{field.note}</p>}
             </div>
           ))}
         </dl>
       ) : (
         <p className="mt-3 text-sm text-slate-600">{status.description}</p>
+      )}
+      {document.table && document.table.rowCount > 0 && (
+        <div className="mt-4">
+          <p className="text-xs font-medium text-slate-700">
+            Transactions: {document.table.rowCount} row{document.table.rowCount === 1 ? "" : "s"} read, {document.table.balanceConsistent} of {document.table.balanceChecked} agree with the running balance.
+            {!document.table.reliable && " The table could not be confirmed reliably, so it is not relied on."}
+          </p>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full min-w-[28rem] text-left text-xs text-slate-700">
+              <caption className="sr-only">First transactions read from the statement</caption>
+              <thead><tr className="text-slate-500"><th scope="col" className="py-1 pr-3 font-medium">Date</th><th scope="col" className="py-1 pr-3 font-medium">Description</th><th scope="col" className="py-1 pr-3 text-right font-medium">Debit</th><th scope="col" className="py-1 pr-3 text-right font-medium">Credit</th><th scope="col" className="py-1 text-right font-medium">Balance</th></tr></thead>
+              <tbody>
+                {document.table.preview.map((row, index) => (
+                  <tr key={index} className="border-t border-slate-100">
+                    <td className="py-1 pr-3">{row.date ?? "—"}</td><td className="max-w-[16rem] truncate py-1 pr-3">{row.description}</td>
+                    <td className="py-1 pr-3 text-right tabular-nums">{row.debit ?? ""}</td><td className="py-1 pr-3 text-right tabular-nums">{row.credit ?? ""}</td><td className="py-1 text-right tabular-nums">{row.balance ?? ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </li>
   );
@@ -64,6 +97,7 @@ function ReconciliationRow({ item }: { item: ReviewReconciliation }) {
           <span className="text-slate-500">{DOC_LABEL[comparison.docType] ?? comparison.docType} says: </span>
           <span className="break-words text-slate-900">{comparison.extractedDisplay}</span>
           {comparison.outcome === "NEAR_MATCH" && <span className="ml-2 text-xs text-warning">close, but not the same</span>}
+          {comparison.outcome === "UNCERTAIN" && <span className="ml-2 text-xs text-warning">read with low certainty — please check the document</span>}
         </p>
       ))}
     </li>
@@ -151,7 +185,7 @@ export function EvidenceReviewPage() {
               <li key={item.issueId} className="flex gap-3 rounded-lg border border-warning-border bg-warning-bg p-4">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
                 <div>
-                  <p className="text-sm font-medium text-slate-900">{issueLabel(item.issueId)} <span className="font-normal text-slate-600">· {item.reason === "NOT_SUPPORTED_BY_DESIGN" ? "not supported yet" : item.reason === "DOCUMENTS_DISAGREE" ? "your documents disagree" : "needs human review"}</span></p>
+                  <p className="text-sm font-medium text-slate-900">{issueLabel(item.issueId)} <span className="font-normal text-slate-600">· {item.reason === "NOT_SUPPORTED_BY_DESIGN" ? "not supported yet" : item.reason === "READING_UNCERTAIN" ? "please check the document" : item.reason === "DOCUMENTS_DISAGREE" ? "your documents disagree" : "needs human review"}</span></p>
                   <p className="mt-1 text-sm text-slate-700">{item.message}</p>
                 </div>
               </li>
