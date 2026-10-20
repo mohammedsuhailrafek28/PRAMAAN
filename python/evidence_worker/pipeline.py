@@ -6,17 +6,15 @@ import re
 import time
 from typing import Dict, List, Optional
 
-import fitz
 import numpy as np
 
 from . import ocr
+from .backends import ACTIVE_MARKERS, BackendUnavailable, Rect, TooManyObjects, open_document  # noqa: F401
 from .layout import Item, Line, build_lines, order_lines
 from .limits import LimitExceeded, check_memory
 from .tables import extract_bank_table
 
-ACTIVE_MARKERS = [(b"/JavaScript", "JAVASCRIPT"), (b"/JS", "JAVASCRIPT"), (b"/Launch", "LAUNCH"), (b"/EmbeddedFile", "EMBEDDED_FILE"),
-                  (b"/RichMedia", "RICH_MEDIA"), (b"/SubmitForm", "SUBMIT_FORM"), (b"/ImportData", "IMPORT_DATA")]
-REJECT_ACTIVE = {"JAVASCRIPT", "LAUNCH", "EMBEDDED_FILE", "RICH_MEDIA", "SUBMIT_FORM", "IMPORT_DATA"}
+REJECT_ACTIVE = {"JAVASCRIPT", "LAUNCH", "EMBEDDED_FILE", "RICH_MEDIA", "SUBMIT_FORM", "IMPORT_DATA", "UNPARSEABLE_STRUCTURE"}
 
 
 class Limits:
@@ -31,34 +29,6 @@ class Limits:
         self.time_budget = kw.get("time_budget", 80.0)
         self.max_memory_mb = kw.get("max_memory_mb", 1500)
         self.max_page_points = kw.get("max_page_points", 6000)
-
-
-def scan_active_content(doc: "fitz.Document", limits: Limits) -> List[str]:
-    found: set = set()
-    count = doc.xref_length()
-    if count > limits.max_objects:
-        raise LimitExceeded("TOO_MANY_OBJECTS")
-    for xref in range(1, count):
-        try:
-            raw = doc.xref_object(xref, compressed=True).encode("latin1", "ignore")
-        except Exception:
-            continue
-        for marker, name in ACTIVE_MARKERS:
-            if marker in raw:
-                found.add(name)
-    return sorted(found)
-
-
-def _dominant_direction(page: "fitz.Page") -> tuple[float, float]:
-    weight: Dict[tuple, int] = {}
-    try:
-        for block in page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]:
-            for line in block.get("lines", []):
-                key = (round(line["dir"][0]), round(line["dir"][1]))
-                weight[key] = weight.get(key, 0) + sum(len(span["text"]) for span in line["spans"])
-    except Exception:
-        return (1.0, 0.0)
-    return max(weight, key=weight.get) if weight else (1.0, 0.0)
 
 
 def _upright(words, direction, page_rect) -> List[Item]:
@@ -112,16 +82,14 @@ def _sufficient(quality: Dict[str, float]) -> bool:
     return quality["alnum"] >= 40 and quality["words"] >= 8 and quality["garbledRatio"] <= 0.1 and (likeness is None or likeness >= LIKENESS_MIN)
 
 
-def _render(page: "fitz.Page", limits: Limits, clip: Optional["fitz.Rect"] = None) -> Optional[tuple[np.ndarray, float]]:
+def _render(page, limits: Limits, clip: Optional[Rect] = None) -> Optional[tuple[np.ndarray, float]]:
     rect = clip or page.rect
     if rect.width > limits.max_page_points or rect.height > limits.max_page_points:
         return None
     scale = min(limits.dpi / 72.0, math.sqrt(limits.max_pixels / max(rect.width * rect.height, 1.0)))
     if scale < 0.5:
         return None
-    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=clip, colorspace=fitz.csRGB, alpha=False)
-    image = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3).copy()
-    return image, scale
+    return page.render(scale, clip), scale
 
 
 def _ocr_items(image: np.ndarray, scale: float):
@@ -134,19 +102,24 @@ def _ocr_items(image: np.ndarray, scale: float):
 def process(path: str, limits: Limits, started: float) -> dict:
     out: dict = {"schema": 1, "status": "OK", "reason": None, "pageCount": 0, "processedPages": 0, "activeContent": [], "pages": [], "tables": [], "ocrPages": 0, "notes": []}
     try:
-        doc = fitz.open(path, filetype="pdf")
+        doc = open_document(path)
+    except BackendUnavailable:
+        raise
     except Exception:
         out.update(status="UNSUPPORTED", reason="NOT_A_PDF")
         return out
-    with doc:
-        if doc.needs_pass or doc.is_encrypted:
+    try:
+        if doc.encrypted:
             out.update(status="UNSUPPORTED", reason="ENCRYPTED")
             return out
         out["pageCount"] = doc.page_count
         if doc.page_count == 0:
             out.update(status="UNREADABLE", reason="NO_PAGES")
             return out
-        out["activeContent"] = scan_active_content(doc, limits)
+        try:
+            out["activeContent"] = doc.active_content(limits.max_objects)
+        except TooManyObjects:
+            raise LimitExceeded("TOO_MANY_OBJECTS")
         if REJECT_ACTIVE & set(out["activeContent"]):
             out.update(status="REJECTED", reason="ACTIVE_CONTENT")
             return out
@@ -162,9 +135,9 @@ def process(path: str, limits: Limits, started: float) -> dict:
                 break
             page_started = time.monotonic()
             check_memory(limits.max_memory_mb)
-            page = doc[index]
-            direction = _dominant_direction(page)
-            words = page.get_text("words")
+            page = doc.page(index)
+            direction = page.direction()
+            words = page.words()
             items, width, height = _upright(words, direction, page.rect)
             quality = _text_quality(items)
             method = "EMBEDDED_TEXT" if _sufficient(quality) else "NONE"
@@ -199,8 +172,8 @@ def process(path: str, limits: Limits, started: float) -> dict:
                 try:
                     page_area = page.rect.width * page.rect.height
                     regions = []
-                    for info in page.get_image_info()[:12]:
-                        rect = fitz.Rect(info["bbox"]) & page.rect
+                    for box in page.image_boxes():
+                        rect = box.intersect(page.rect)
                         if rect.is_empty or rect.width * rect.height < 0.12 * page_area:
                             continue
                         covered = sum(max(0.0, (min(w[2], rect.x1) - max(w[0], rect.x0))) * max(0.0, (min(w[3], rect.y1) - max(w[1], rect.y0))) for w in words)
@@ -248,6 +221,8 @@ def process(path: str, limits: Limits, started: float) -> dict:
             out["status"], out["reason"] = "PARTIAL", degraded
         if not any(page["lines"] for page in out["pages"]):
             out["status"], out["reason"] = "UNREADABLE", out["reason"] or "NO_EXTRACTABLE_TEXT"
+    finally:
+        doc.close()
     return out
 
 

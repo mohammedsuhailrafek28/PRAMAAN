@@ -1,0 +1,6 @@
+# EXPERIMENTAL alternative PDF backend (EVIDENCE_PDF_BACKEND=pdfium). Not used unless explicitly selected; see
+# docs/HORIZON_DOCUMENT_INTELLIGENCE.md for the licence summary and the comparison gates. It replaces PyMuPDF only in a
+# test or staging environment; production keeps the default backend until every gate is passed and reviewed.
+-r requirements.txt
+pypdfium2==5.11.0   # Apache-2.0 or BSD-3-Clause (PDFium itself: BSD-style; its notices must ship with binaries)
+pypdf==6.21.1       # BSD-3-Clause; inspects PDF objects for active content because PDFium has no object access

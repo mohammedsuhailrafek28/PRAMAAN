@@ -12,13 +12,14 @@
 
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { ApiError } from "../../utils/apiError.js";
 import { containerRunArgs, dockerCliEnvironment, dockerExecutable } from "./worker-container.js";
 
+const CONTAINER_TIME_BUDGET_SECONDS = 170;
 export const WORKER_DEFAULTS = {
   timeoutMs: 120_000,
   maxStdoutBytes: 24 * 1024 * 1024,
@@ -128,7 +129,9 @@ function minimalEnvironment(tempDir: string): NodeJS.ProcessEnv {
 }
 
 function workerFlags(kind: WorkerKind): string[] {
-  const limits = WORKER_DEFAULTS.limits;
+  // Containerised OCR measured ~2.5x slower than a local process on Docker Desktop (mixed 3-page statement: ~60 s vs ~23 s),
+  // so it gets a larger cooperative budget; the hard wall-clock kill is raised to match (see timeoutFor).
+  const limits = { ...WORKER_DEFAULTS.limits, timeBudgetSeconds: workerMode() === "container" ? CONTAINER_TIME_BUDGET_SECONDS : WORKER_DEFAULTS.limits.timeBudgetSeconds };
   return ["--kind", kind, "--max-pages", String(limits.maxPages), "--max-ocr-pages", String(limits.maxOcrPages), "--max-pixels", String(limits.maxPixels), "--dpi", String(limits.dpi),
     "--time-budget", String(limits.timeBudgetSeconds), "--max-memory-mb", String(limits.maxMemoryMb)];
 }
@@ -197,7 +200,7 @@ export async function runWorker(bytes: Buffer, kind: WorkerKind, options: { time
   if (options.signal?.aborted) throw new ExtractionAborted();
   await acquire();
   const started = Date.now();
-  const timeoutMs = options.timeoutMs ?? WORKER_DEFAULTS.timeoutMs;
+  const timeoutMs = options.timeoutMs ?? (workerMode() === "container" ? 210_000 : WORKER_DEFAULTS.timeoutMs);
   let tempDir: string | null = null;
   try {
     let result: WorkerRun | null;
@@ -219,4 +222,22 @@ export async function runWorker(bytes: Buffer, kind: WorkerKind, options: { time
     if (tempDir) await rm(tempDir, { recursive: true, force: true, maxRetries: 3 }).catch(() => undefined);
     release();
   }
+}
+
+/**
+ * Removes work directories orphaned by a hard-killed API process (the `finally` that normally removes them never ran).
+ * Only directories this module created (prefix) and older than `olderThanMs` are touched, so a live extraction is never affected.
+ */
+export async function sweepStaleWorkDirs(olderThanMs = 15 * 60_000): Promise<number> {
+  let removed = 0;
+  for (const name of await readdir(os.tmpdir()).catch(() => [] as string[])) {
+    if (!name.startsWith("pramaan-extract-")) continue;
+    const target = path.join(os.tmpdir(), name);
+    try {
+      if (Date.now() - (await stat(target)).mtimeMs < olderThanMs) continue;
+      await rm(target, { recursive: true, force: true, maxRetries: 3 });
+      removed += 1;
+    } catch { /* best effort */ }
+  }
+  return removed;
 }

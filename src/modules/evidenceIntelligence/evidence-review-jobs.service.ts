@@ -28,12 +28,13 @@ const ACTIVE: JobStatus[] = ["QUEUED", "RUNNING"];
 export const JOB_LIMITS = {
   maxActive: Number(process.env.EVIDENCE_REVIEW_QUEUE_MAX ?? 20),
   maxRunning: Number(process.env.EVIDENCE_REVIEW_CONCURRENCY ?? 2),
-  staleHeartbeatMs: Number(process.env.EVIDENCE_REVIEW_STALE_MS ?? 4 * 60_000),
+  staleHeartbeatMs: Number(process.env.EVIDENCE_REVIEW_STALE_MS ?? 6 * 60_000),
   retentionMs: 24 * 60 * 60 * 1000
 };
 
 const running = new Map<string, AbortController>();
 let pumping = false;
+let again = false;
 
 type Row = NonNullable<Awaited<ReturnType<typeof prisma.evidenceReviewJob.findFirst>>>;
 type OwnerState = Awaited<ReturnType<typeof loadOwnerState>>;
@@ -108,18 +109,23 @@ export async function startReviewJob(userId: string) {
 }
 
 async function pump() {
-  if (pumping) return;
+  // A request that arrives while the loop is between its last look at the queue and clearing `pumping` must not be lost:
+  // it sets `again`, and the loop looks once more.
+  if (pumping) { again = true; return; }
   pumping = true;
   try {
-    while (running.size < JOB_LIMITS.maxRunning) {
-      const next = await prisma.evidenceReviewJob.findFirst({ where: { status: "QUEUED" }, orderBy: { createdAt: "asc" } });
-      if (!next) break;
-      const claimed = await prisma.evidenceReviewJob.updateMany({ where: { id: next.id, status: "QUEUED" }, data: { status: "RUNNING", startedAt: new Date(), heartbeatAt: new Date() } });
-      if (claimed.count !== 1) continue;
-      const controller = new AbortController();
-      running.set(next.id, controller);
-      void runJob(next, controller);
-    }
+    do {
+      again = false;
+      while (running.size < JOB_LIMITS.maxRunning) {
+        const next = await prisma.evidenceReviewJob.findFirst({ where: { status: "QUEUED" }, orderBy: { createdAt: "asc" } });
+        if (!next) break;
+        const claimed = await prisma.evidenceReviewJob.updateMany({ where: { id: next.id, status: "QUEUED" }, data: { status: "RUNNING", startedAt: new Date(), heartbeatAt: new Date() } });
+        if (claimed.count !== 1) continue;
+        const controller = new AbortController();
+        running.set(next.id, controller);
+        void runJob(next, controller);
+      }
+    } while (again);
   } finally {
     pumping = false;
   }

@@ -33,10 +33,13 @@ def main(argv=None) -> int:
         parser.error("exactly one of --input or --stdin is required")
 
     started = time.monotonic()
-    import fitz
+    from .backends import BackendUnavailable, backend_name, version_info
 
-    fitz.TOOLS.mupdf_display_errors(False)  # MuPDF otherwise prints parser diagnostics onto the output streams
-    fitz.TOOLS.mupdf_display_warnings(False)
+    if backend_name() == "pymupdf":
+        import fitz
+
+        fitz.TOOLS.mupdf_display_errors(False)  # MuPDF otherwise prints parser diagnostics onto the output streams
+        fitz.TOOLS.mupdf_display_warnings(False)
     block_network()
     enforced = apply_hard_limits(args.max_memory_mb, int(args.time_budget * 2))
     from .pipeline import Limits, process, process_image
@@ -71,6 +74,8 @@ def main(argv=None) -> int:
         result = empty("REJECTED", exceeded.reason)
     except MemoryError:
         result = empty("REJECTED", "MEMORY_LIMIT")
+    except BackendUnavailable:
+        result = empty("UNREADABLE", "PDF_BACKEND_UNAVAILABLE")
     except Exception as error:  # never echo content; the class name is enough for operators
         print(f"worker error: {type(error).__name__}", file=sys.stderr)
         result = empty("UNREADABLE", "PARSE_ERROR")
@@ -79,7 +84,7 @@ def main(argv=None) -> int:
             import shutil
 
             shutil.rmtree(scratch, ignore_errors=True)
-    result["engine"] = {"pymupdf": fitz.VersionBind, "ocr": ocr.engine_version() if ocr.available() else None, "python": sys.version.split()[0]}
+    result["engine"] = {**version_info(), "ocr": ocr.engine_version() if ocr.available() else None, "python": sys.version.split()[0]}
     result["metrics"] = {"elapsedMs": int((time.monotonic() - started) * 1000), "peakWorkingSetMb": round(peak_working_set_mb(), 1), "enforced": enforced}
     sys.stdout.write(json.dumps(result, ensure_ascii=True, separators=(",", ":")))
     sys.stdout.flush()

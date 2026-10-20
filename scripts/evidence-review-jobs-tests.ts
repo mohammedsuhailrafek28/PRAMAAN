@@ -4,7 +4,7 @@
 // enough to observe (it sleeps, then runs the real worker; "crash" makes it fail).
 import assert from "node:assert/strict";
 import { execSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
@@ -137,7 +137,7 @@ async function cleanup() {
   await stopServer();
   for (const target of [dbDir, uploadsDir, fakeWorkerDir]) if (existsSync(target)) rmSync(target, { recursive: true, force: true, maxRetries: 5 });
 }
-const extractTempDirs = () => readdirSync(os.tmpdir()).filter((name) => name.startsWith("pramaan-extract-")).length;
+const extractTempDirNames = () => readdirSync(os.tmpdir()).filter((name) => name.startsWith("pramaan-extract-"));
 
 async function main() {
   mkdirSync(dbDir, { recursive: true });
@@ -148,7 +148,7 @@ async function main() {
   startServer();
   await waitForServer();
   const prisma = new PrismaClient({ datasourceUrl: databaseUrl });
-  const tmpBefore = extractTempDirs();
+  const tmpBefore = new Set(extractTempDirNames());
 
   // ---- the migration created the table and the one-active-job-per-business index
   const indexes = await prisma.$queryRawUnsafe<Array<{ name: string }>>("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='EvidenceReviewJob'");
@@ -304,6 +304,11 @@ async function main() {
   for (const secret of [ACCOUNT, alpha.pan, alpha.gstin, UDYAM]) assert(!serverLog.includes(secret), "server log contains a sensitive value");
   pass("job status payloads, job rows and server logs contain no PAN, GSTIN, account or Udyam number");
 
+  await sleep(1000);
+  const leaked = extractTempDirNames().filter((name) => !tmpBefore.has(name));
+  assert.deepEqual(leaked, [], "no worker temp directories left behind by completed, cancelled, superseded or crashed jobs");
+  pass("worker temp directories are removed after completed, cancelled, superseded and crashed jobs");
+
   // ---- restart: a running job is explicitly failed, cached results are gone (corrections ask for a re-run)
   setDelay(20);
   const crashy = await newOwner(["GST"]);
@@ -338,8 +343,19 @@ async function main() {
 
   // ---- cleanup guarantees
   await stopServer();
-  assert.equal(extractTempDirs(), tmpBefore, "no worker temp directories left behind");
-  pass("no isolated worker temp directories remain after cancelled, crashed and killed jobs");
+  // A hard-killed server cannot run its own cleanup, so its in-flight worker leaves a directory behind; startup sweeps those.
+  const { sweepStaleWorkDirs } = await import("../src/modules/evidenceIntelligence/worker-client.js");
+  const orphanDir = path.join(os.tmpdir(), `pramaan-extract-orphan-${runId}`);
+  mkdirSync(orphanDir, { recursive: true });
+  const anHourAgo = new Date(Date.now() - 60 * 60_000);
+  utimesSync(orphanDir, anHourAgo, anHourAgo);
+  const fresh = path.join(os.tmpdir(), `pramaan-extract-fresh-${runId}`);
+  mkdirSync(fresh, { recursive: true });
+  await sweepStaleWorkDirs();
+  assert(!existsSync(orphanDir), "an hour-old orphan work dir is removed");
+  assert(existsSync(fresh), "a recent work dir (possibly in use) is left alone");
+  rmSync(fresh, { recursive: true, force: true });
+  pass("orphans of a hard-killed server are swept at startup, recent directories are left alone");
 
   await prisma.$disconnect();
 }
