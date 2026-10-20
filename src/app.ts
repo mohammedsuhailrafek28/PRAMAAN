@@ -20,6 +20,7 @@ import auditRoutes from "./modules/audit/audit.routes.js";
 import notificationRoutes from "./modules/notifications/notifications.routes.js";
 import readinessRoutes from "./modules/readinessEngine/readiness.routes.js";
 import reportRoutes from "./modules/reportComposer/report.routes.js";
+import evidenceIntelligenceRoutes from "./modules/evidenceIntelligence/evidence-intelligence.routes.js";
 import accessGrantRoutes, { guestRouter } from "./modules/accessGrant/accessGrant.routes.js";
 import onboardingRoutes from "./modules/onboarding/onboarding.routes.js";
 
@@ -126,6 +127,7 @@ app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
 app.use("/api", apiRateLimit);
 app.use("/api/auth", authRoutes);
 app.use("/api/business", businessRoutes);
+app.use("/api/evidence-intelligence", evidenceIntelligenceRoutes);
 app.use("/api/passport", passportRoutes);
 app.use("/api/consent-requests", consentRoutes);
 app.use("/api/trust-view", trustViewRoutes);

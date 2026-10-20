@@ -1,0 +1,3 @@
+# Extra dependency for the synthetic evaluation corpus generator (python/evidence_eval). Not needed in production.
+-r requirements.txt
+reportlab>=4.2

@@ -18,3 +18,5 @@ test-fixtures/*
 !test-fixtures/
 !test-fixtures/*.pdf
 phase3-*.png
+__pycache__/
+*.pyc
