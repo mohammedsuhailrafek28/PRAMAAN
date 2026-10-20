@@ -142,6 +142,9 @@ model User {
   onboardingAssignmentsRequested OnboardingPackAssignment[] @relation("OnboardingRequester")
   requesterAssurance RequesterAssurance?
   requesterAssuranceEvents RequesterAssuranceEvent[]
+  evidenceRequestsRequested EvidenceRequest[] @relation("EvidenceRequestRequester")
+  evidenceRequestResponses EvidenceRequestResponse[] @relation("EvidenceResponseActor")
+  evidenceRequestEvents EvidenceRequestEvent[] @relation("EvidenceEventActor")
 }
 
 model RequesterAssurance {
@@ -202,6 +205,7 @@ model Business {
   generatedReports   GeneratedReport[]
   accessGrants       AccessGrant[]
   onboardingAssignments OnboardingPackAssignment[]
+  evidenceRequests EvidenceRequest[]
 }
 
 model Document {
@@ -228,6 +232,7 @@ model Document {
   business     Business     @relation(fields: [businessId], references: [id])
   previousVersion Document? @relation("DocumentRevisions", fields: [previousVersionId], references: [id])
   nextVersions   Document[] @relation("DocumentRevisions")
+  evidenceRequestResponses EvidenceRequestResponse[]
 
   @@index([businessId, docType, isCurrent])
   @@index([previousVersionId])
@@ -289,10 +294,66 @@ model OnboardingPackAssignment {
   requester           User @relation("OnboardingRequester", fields: [requesterId], references: [id])
   auditLogs           AuditLog[]
   notifications       Notification[]
+  evidenceRequests EvidenceRequest[]
 
   @@index([businessId, status, createdAt])
   @@index([requesterId, status, createdAt])
   @@index([packKey, packVersion])
+}
+
+model EvidenceRequest {
+  id                   String   @id @default(cuid())
+  assignmentId         String
+  businessId           String
+  requesterId          String
+  requirementKey       String
+  requirementSnapshot  Json
+  requestKind          String
+  reason               String
+  status               String   @default("OPEN")
+  activeKey            String?  @unique
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  assignment           OnboardingPackAssignment @relation(fields: [assignmentId], references: [id])
+  business             Business @relation(fields: [businessId], references: [id])
+  requester            User @relation("EvidenceRequestRequester", fields: [requesterId], references: [id])
+  responses            EvidenceRequestResponse[]
+  events               EvidenceRequestEvent[]
+
+  @@index([assignmentId, status, createdAt])
+  @@index([businessId, status, createdAt])
+  @@index([requesterId, status, createdAt])
+}
+
+model EvidenceRequestResponse {
+  id                String   @id @default(cuid())
+  requestId         String
+  responderId       String
+  responseType      String
+  documentId        String?
+  clarificationText String?
+  createdAt         DateTime @default(now())
+  request           EvidenceRequest @relation(fields: [requestId], references: [id])
+  responder         User @relation("EvidenceResponseActor", fields: [responderId], references: [id])
+  document          Document? @relation(fields: [documentId], references: [id])
+
+  @@index([requestId, createdAt])
+  @@index([documentId])
+}
+
+model EvidenceRequestEvent {
+  id         String   @id @default(cuid())
+  requestId  String
+  actorId    String
+  action     String
+  fromStatus String?
+  toStatus   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  request    EvidenceRequest @relation(fields: [requestId], references: [id])
+  actor      User @relation("EvidenceEventActor", fields: [actorId], references: [id])
+
+  @@index([requestId, createdAt])
 }
 
 model AccessGrant {

@@ -743,6 +743,47 @@ export const openApiSpec = {
     "/api/onboarding/assignments/{id}/cancel": {
       patch: { tags: ["Onboarding packs"], summary: "Requester cancels its own assignment", security: [{ bearerAuth: [] }], parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "Cancelled assignment" } } }
     },
+    "/api/onboarding/evidence-requests": {
+      get: {
+        tags: ["Evidence review"],
+        summary: "List targeted evidence follow-up cases",
+        description: "MSMEs receive incoming cases; buyers and banks receive their own outgoing cases. Responses contain progress and case history only, never raw documents or private extraction details.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "scope", in: "query", required: true, schema: { type: "string", enum: ["incoming", "outgoing"] } }],
+        responses: { "200": { description: "Evidence request cases" }, "403": { $ref: "#/components/responses/Forbidden" } }
+      }
+    },
+    "/api/onboarding/evidence-requests/{id}": {
+      get: {
+        tags: ["Evidence review"], summary: "Read an owned evidence follow-up case", security: [{ bearerAuth: [] }],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "Evidence request detail" }, "403": { $ref: "#/components/responses/Forbidden" } }
+      }
+    },
+    "/api/onboarding/assignments/{assignmentId}/evidence-requests": {
+      post: {
+        tags: ["Evidence review"], summary: "Request missing evidence or clarification for one pack requirement", description: "Buyer or bank only. Requester assurance is rechecked and high-sensitivity requirements remain restricted. This never creates consent.", security: [{ bearerAuth: [] }],
+        parameters: [{ name: "assignmentId", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["requirementKey", "requestKind", "reason"], properties: { requirementKey: { type: "string", example: "GST_CERTIFICATE" }, requestKind: { type: "string", enum: ["MISSING_EVIDENCE", "CLARIFICATION"] }, reason: { type: "string", maxLength: 500 } } } } } },
+        responses: { "201": { description: "Targeted evidence request" }, "403": { $ref: "#/components/responses/Forbidden" }, "409": { description: "Assignment or active case conflict" } }
+      }
+    },
+    "/api/onboarding/evidence-requests/{id}/respond": {
+      post: {
+        tags: ["Evidence review"], summary: "MSME responds to a targeted case", description: "The owner may reference an existing document or submit a clarification. Uploads use the existing MSME document endpoint; this action records the reference without exposing the file.", security: [{ bearerAuth: [] }],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["responseType"], properties: { responseType: { type: "string", enum: ["DOCUMENT_REFERENCE", "CLARIFICATION"] }, documentId: { type: "string" }, clarification: { type: "string", maxLength: 1000 } } } } } },
+        responses: { "200": { description: "Recorded owner response" }, "403": { $ref: "#/components/responses/Forbidden" }, "409": { description: "Case is no longer awaiting a response" } }
+      }
+    },
+    "/api/onboarding/evidence-requests/{id}/review": {
+      patch: {
+        tags: ["Evidence review"], summary: "Buyer or bank reviews an owner response", description: "Review decisions are workflow decisions only and do not mean government verification or grant consent.", security: [{ bearerAuth: [] }],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["decision"], properties: { decision: { type: "string", enum: ["RESOLVED", "INSUFFICIENT", "ACTION_REQUIRED"] }, note: { type: "string", maxLength: 500 } } } } } },
+        responses: { "200": { description: "Updated case decision" }, "403": { $ref: "#/components/responses/Forbidden" }, "409": { description: "Case is not ready for review" } }
+      }
+    },
     "/api/audit-logs": {
       get: {
         tags: ["Audit"],
