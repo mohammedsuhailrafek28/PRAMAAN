@@ -1,5 +1,6 @@
 import { execSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 const root = process.cwd();
@@ -23,6 +24,18 @@ async function call(method: string, url: string, options: { token?: string; body
   const data = text ? JSON.parse(text) : {};
   if (!(options.expected ?? [200, 201]).includes(response.status)) throw new Error(`${method} ${url}: ${response.status} ${text}`);
   return { response, data };
+}
+async function upload(token: string, docType: string, fileName: string, metadata: { issuedAt?: string; expiresAt?: string } = {}) {
+  const form = new FormData();
+  form.set("docType", docType);
+  for (const [key, value] of Object.entries(metadata)) if (value) form.set(key, value);
+  const fileContents = await readFile(path.join(root, "test-fixtures", fileName), "utf8");
+  form.set("file", new Blob([fileContents], { type: "application/pdf" }), fileName);
+  const response = await fetch(`${base}/api/business/documents`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : {};
+  if (response.status !== 201) throw new Error(`POST /api/business/documents: ${response.status} ${text}`);
+  return data;
 }
 async function blocked(method: string, url: string, token: string, code: string) {
   const result = await call(method, url, { token, expected: [403, 404] });
@@ -64,6 +77,20 @@ async function main() {
   await blocked("GET", "/api/onboarding/assignments?scope=incoming", buyer.token, "FORBIDDEN");
   const accepted = await call("PATCH", `/api/onboarding/assignments/${assignmentId}/accept`, { token: msme.token });
   assert(accepted.data.assignment.status === "ACCEPTED", "owning MSME can accept a pending assignment");
+  await upload(msme.token, "GST_CERTIFICATE", "gst-certificate.pdf", { issuedAt: "2026-01-01" });
+  await call("POST", "/api/business/cross-check", { token: msme.token });
+  const afterUpload = await call("GET", `/api/onboarding/assignments/${assignmentId}`, { token: msme.token });
+  const gstItem = afterUpload.data.assignment.checklist.find((item: any) => item.key === "GST_CERTIFICATE");
+  assert(gstItem?.status === "SUBMITTED" && gstItem?.evidenceStatus === "DOCUMENT_SUBMITTED", "submitted evidence is not misclassified as contradicted");
+  assert(!("originalName" in gstItem) && !("filePath" in gstItem), "owner checklist still excludes raw file metadata");
+  await upload(msme.token, "GST_CERTIFICATE", "gst-certificate.pdf", { issuedAt: "2024-01-01", expiresAt: "2025-01-01" });
+  await call("POST", "/api/business/cross-check", { token: msme.token });
+  const afterExpiry = await call("GET", `/api/onboarding/assignments/${assignmentId}`, { token: msme.token });
+  assert(afterExpiry.data.assignment.checklist.find((item: any) => item.key === "GST_CERTIFICATE")?.status === "EXPIRED", "expired replacement is surfaced as expired");
+  await upload(msme.token, "GST_CERTIFICATE", "gst-certificate.pdf", { issuedAt: "2026-01-01" });
+  await call("POST", "/api/business/cross-check", { token: msme.token });
+  const afterReplacement = await call("GET", `/api/onboarding/assignments/${assignmentId}`, { token: msme.token });
+  assert(afterReplacement.data.assignment.checklist.find((item: any) => item.key === "GST_CERTIFICATE")?.status === "SUBMITTED", "current replacement returns to submitted");
   const outgoing = await call("GET", "/api/onboarding/assignments?scope=outgoing", { token: buyer.token });
   assert(outgoing.data.assignments[0].status === "ACCEPTED", "requester can track accepted assignment progress");
   assert(outgoing.data.assignments[0].checklist.every((item: any) => ["OUTSTANDING", "RECEIVED"].includes(item.status)), "requester receives only coarse checklist states");

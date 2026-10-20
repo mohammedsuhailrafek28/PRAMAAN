@@ -186,6 +186,29 @@ PATCH /api/onboarding/assignments/:id/cancel
 
 Pack versions are pinned into each assignment through `requirementsSnapshot`; publishing a later version cannot change an existing request. Requester assurance is rechecked for protected operations, and all assignment transitions are audited and notified transactionally with the assignment update.
 
+### Phase 1A local demo
+
+Use the synthetic seeded data and run the backend from the repository root:
+
+```bash
+npm install
+npm run prisma:generate
+npm run db:init
+npm run db:seed
+npm run dev
+```
+
+In a second terminal, run the included frontend against the backend:
+
+```bash
+cd frontend
+npm install
+set VITE_API_URL=http://localhost:4000/api
+npm run dev -- --host localhost --port 5173
+```
+
+Open `http://localhost:5173`. The seeded demo accounts use password `password123`. The onboarding demo is collection-only: a buyer or bank sends the published vendor pack, the MSME accepts it and uploads synthetic evidence, and any Trust Profile disclosure is still approved separately in Consent & Access. Use `localhost` rather than `127.0.0.1` unless `CORS_ORIGIN` is explicitly configured for the alternate origin.
+
 ## Report Composer
 
 Trust OS answers: "What do we know?"

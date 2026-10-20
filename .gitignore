@@ -12,5 +12,7 @@ prisma/.tmp-smoke/
 dev.db-journal
 .DS_Store
 *.log
-test-fixtures/
+test-fixtures/*
+!test-fixtures/
+!test-fixtures/*.pdf
 phase3-*.png

@@ -4,6 +4,7 @@ import { ApiError } from "../../utils/apiError.js";
 import { writeAuditLog } from "../audit/audit.service.js";
 import { createNotification } from "../notifications/notifications.service.js";
 import { effectiveStatus, enforceDisclosureAccess, getForRequester, requesterIdentitySummary } from "../requesterAssurance/assurance.service.js";
+import { hasFailedCheck } from "../evidence/evidence-lifecycle.service.js";
 import { getPublishedPack, listPublishedPacks, validatePackRequirements, type PackRequirement } from "./onboarding.registry.js";
 
 type AssignmentWithRelations = Prisma.OnboardingPackAssignmentGetPayload<{
@@ -23,7 +24,7 @@ function stateForDocument(document: { evidenceStatus: string; expiresAt: Date | 
   if (!document) return "MISSING" as const;
   if (document.expiresAt && document.expiresAt <= now) return "EXPIRED" as const;
   if (document.evidenceStatus === "REJECTED") return "REJECTED" as const;
-  if (document.contradictionDetails !== null) return "CONTRADICTED" as const;
+  if (hasFailedCheck(document.contradictionDetails)) return "CONTRADICTED" as const;
   return "SUBMITTED" as const;
 }
 
