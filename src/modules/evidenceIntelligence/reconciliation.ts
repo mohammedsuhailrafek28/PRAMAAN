@@ -154,7 +154,7 @@ function reconcileClaim(claim: Exclude<ReconciledClaim, "bankAccount">, declared
   }
   // Only certain readings can make documents disagree with each other.
   const extracted = comparisons.filter((item) => item.extractedValue !== null && !item.needsReview);
-  const distinctExtracted = new Set(extracted.map((item) => (claim === "legalName" ? normalizeNameForComparison(item.extractedValue) : identifier(item.extractedValue))));
+  const distinctExtracted = new Set(extracted.map((item) => (claim === "legalName" ? compactName(normalizeNameForComparison(item.extractedValue)) : identifier(item.extractedValue))));
   let crossDocumentConflict = distinctExtracted.size > 1;
   if (claim === "pan") {
     // The PAN printed on a GST certificate must agree with the PAN embedded in that certificate's own GSTIN.

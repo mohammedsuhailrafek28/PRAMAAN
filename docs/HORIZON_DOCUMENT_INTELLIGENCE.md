@@ -465,3 +465,12 @@ budget and was returned as PARTIAL rather than being allowed to run on.
     failed one accuracy gate and remains experimental.
 13. A syntactically valid, checksum-valid but *fabricated* document will be read and matched like a real one. Reading is not
     authentication; that is why nothing here changes trust status, scores or consent.
+
+## 8. Browser journey finding (fixed)
+
+A real-browser run with one consistent fictional business (text GST certificate + scanned Udyam certificate + scanned
+2-page statement, `generate_demo_pack`) exposed a false "Submitted documents disagree with each other" conflict: scan reading
+fuses words ("MoonriseFabricatorsLLP") while the text certificate has spaces, and the cross-document check compared
+space-sensitive strings even though the declared-value comparison already ignored spaces. Fixed in `reconciliation.ts`
+(whitespace-insensitive cross-document name comparison; regression test added). The single-document benchmark could not
+reveal this because it never combines documents; the multi-document case is covered only by this demo pack and the unit test.

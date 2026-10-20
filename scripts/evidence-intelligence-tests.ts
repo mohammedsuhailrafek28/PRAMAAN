@@ -207,6 +207,13 @@ test("no relevant document is INSUFFICIENT; an unreadable one is UNREADABLE", ()
   assert.equal(statusOf(reconcileClaims(declared, [extract("GST_CERTIFICATE", buildPdf([[]]))]), "gstin"), "UNREADABLE");
 });
 
+test("the same name with and without spaces (typical of scan reading) is not a cross-document conflict", () => {
+  const result = reconcileClaims(declared, [extract("GST_CERTIFICATE", gstPdf()), extract("UDYAM_CERTIFICATE", udyamPdf({ name: NAME.replace(/ /g, "") }))]);
+  const claim = result.find((item) => item.claim === "legalName");
+  assert.equal(claim?.crossDocumentConflict, false);
+  assert.equal(claim?.status, "MATCHED");
+});
+
 test("conflicting multiple documents are flagged as a cross-document conflict", () => {
   const result = reconcileClaims(declared, [extract("GST_CERTIFICATE", gstPdf()), extract("UDYAM_CERTIFICATE", udyamPdf({ name: "Moonrise Traders LLP" }))]);
   const claim = result.find((item) => item.claim === "legalName");
