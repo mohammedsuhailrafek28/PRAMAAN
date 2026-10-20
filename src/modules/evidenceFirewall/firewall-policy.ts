@@ -17,3 +17,6 @@ export const DEFAULT_FIREWALL_POLICY: FirewallPolicy = {
 };
 
 export const FIREWALL_LIMITATION = "No external source was consulted. A supported conclusion means internally cross-checked, document-submitted evidence, not source verification.";
+
+/** The only cross-check method Pramaan has (trustEngine CROSS_CHECK_METHOD). Anything else is impossible provenance. */
+export const INTERNAL_CROSS_CHECK_METHOD = "INTERNAL_METADATA_CHECK";

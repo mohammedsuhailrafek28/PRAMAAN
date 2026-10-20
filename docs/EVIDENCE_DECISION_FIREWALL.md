@@ -1,4 +1,8 @@
-# Evidence Decision Firewall — specification (isolated module, revision 2)
+# Evidence Decision Firewall — specification (isolated module, revision 3)
+
+Revision 3 (security remediation): strict authorisation shape (§2.1), impossible-provenance rejection (§3.1), a
+documented snapshot-wide unsuitability channel (L7). Trusted adapter design: `EVIDENCE_FIREWALL_ADAPTER.md`.
+Repeated-query analysis and controls: `EVIDENCE_FIREWALL_PRIVACY.md`.
 
 Status: isolated pure module. No route, no scoring, no Passport, no schema change.
 Code: `src/modules/evidenceFirewall/`. Tests: `scripts/evidence-firewall-tests.ts`, `scripts/evidence-firewall-parity-tests.ts`.
@@ -40,6 +44,24 @@ Let the *full scope* be the channel's complete approved fields + evidence types.
    Because canonical access is denied for the whole grant when assurance lapses, the firewall denies too, even
    for LOW items.
 
+### 2.1 Explicit shape (revision 3)
+
+The authorisation object must carry **every** property as an explicit own property: `channel, status, expiresAt,
+revokedAt, pinnedPassportId, approvedFields, approvedEvidenceTypes, requester`. `null` is a meaningful value ("does not
+expire", "not revoked", "no linked requester"); a missing or `undefined` property is not, and inherited properties do not
+count. `expiresAt` and `revokedAt` accept only `null` or a full ISO-8601 instant with an explicit zone (so `"2026"`,
+`"20 Oct 2026"`, date-only strings, numbers and Dates are rejected), and `now` is held to the same rule.
+Channel semantics:
+
+| | `expiresAt` | `revokedAt` |
+|---|---|---|
+| CONSENT | `null` (never expires, canonical) or a future instant | must be `null` |
+| GUEST_LINK | a future instant (a link always expires) | must be `null` |
+
+A non-null `revokedAt` on a live-status record is contradictory and denied. A requester assurance record must likewise
+carry `assuranceStatus`, `authorizationExpiresAt` (null or ISO) and `authorizationScope` explicitly; a missing
+`authorizationExpiresAt` is not "no expiry".
+
 Authorisation never reads the snapshot's contents. Nothing about contradictions, evidence or claims can influence
 whether a request is authorised.
 
@@ -52,6 +74,15 @@ in the enum, valid ISO `checkedAt`/`uploadedAt`, `issuedAt`/`expiresAt` null or 
 unique documentIds; `fieldConfidence[]` well-formed with known check outcomes; `contradictions[]` array of
 well-formed entries; `lastCalculatedAt` valid. Every `evidenceId` a claim cites must resolve in embedded
 `evidence[]` (a dangling id = tampering = unsuitable). `documents[]` is never consulted.
+
+### 3.1 Impossible provenance (revision 3)
+
+Pramaan has no authoritative-source integration, so provenance that implies one is rejected, not interpreted. The
+snapshot is unsuitable if **any** field or evidence record has status `SOURCE_VERIFIED`, **any** check of type
+`SOURCE_VERIFICATION` has a result other than `NOT_APPLICABLE`, or any evidence record's `crossCheckMethod` is not
+`INTERNAL_METADATA_CHECK`. This is deliberately snapshot-wide (it cannot be confined to the requested claim without
+trusting a forged record) and fails closed to `CONFIRMATION_UNAVAILABLE`. When a real source integration exists, this
+rule must be revisited together with the engine, not relaxed silently.
 
 ## 4. Contradiction policy (D1 — conservative withholding)
 
@@ -98,9 +129,13 @@ This module does **not** provide noninterference. Known, accepted inferences:
 * **L6** The visible contradiction table is policy: adding an entry whose involved items are all disclosable makes
   that conflict visible by design.
 
+* **L7** Snapshot-wide integrity failures (malformed or forged records anywhere in the snapshot, including data the
+  requester may not see) make every positive conclusion `CONFIRMATION_UNAVAILABLE`. This is a second channel through which
+  hidden data influences output, beyond hidden-conflict withholding.
+
 What *is* tested: hidden data (unauthorised fields, unauthorised evidence, contradiction values, conflict detail,
-other claims) changes the output **only** through the withholding path in §4 — mutating it otherwise leaves the
-serialised decision byte-identical; mutating a hidden conflict can only turn a positive verdict into
+other claims) changes the output **only** through the withholding path in §4 — mutating well-formed hidden data otherwise leaves the
+serialised decision byte-identical (integrity failures, L7, are the exception); mutating a hidden conflict can only turn a positive verdict into
 `CONFIRMATION_UNAVAILABLE`.
 
 ## 6. Output

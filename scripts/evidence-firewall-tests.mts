@@ -66,7 +66,7 @@ const supported = (field: string): ConclusionRequest => ({ kind: "FIELD_SUPPORTE
 const noConflict = (field: string): ConclusionRequest => ({ kind: "FIELD_NOT_CONTRADICTED", field });
 const current = (docType: string): ConclusionRequest => ({ kind: "EVIDENCE_CURRENT", docType });
 function run(request: ConclusionRequest, options: { snapshot?: unknown; authorization?: AuthorizationContext; now?: string; policy?: FirewallPolicy; id?: string } = {}) {
-  const input: FirewallInput = { snapshot: "snapshot" in options ? options.snapshot : buildSnapshot(), snapshotPassportId: options.id ?? PASSPORT, authorization: options.authorization ?? grant(), request, now: options.now ?? NOW };
+  const input: FirewallInput = { snapshot: "snapshot" in options ? options.snapshot : buildSnapshot(), snapshotPassportId: options.id ?? PASSPORT, authorization: "authorization" in options ? options.authorization as AuthorizationContext : grant(), request, now: "now" in options ? options.now as string : NOW };
   return options.policy ? evaluateConclusion(input, options.policy) : evaluateConclusion(input);
 }
 const expect = (decision: ReturnType<typeof run>, verdict: string, reasonCode: string, label: string) => assert(decision.verdict === verdict && decision.reasonCode === reasonCode, `${label}: got ${decision.verdict}/${decision.reasonCode}, wanted ${verdict}/${reasonCode}`);
@@ -317,7 +317,7 @@ test("unknown or inconsistent evidence fails closed", () => {
   expect(run(supported("gstin"), { snapshot: wrongType }), ...UNAVAILABLE, "gstin citing the Udyam record");
   const unknownOutcome = buildSnapshot();
   unknownOutcome.fieldConfidence.find((e: any) => e.field === "gstin").checks.push({ type: "SOURCE_VERIFICATION", result: "PASSED", reason: "forged" });
-  expect(run(supported("gstin"), { snapshot: unknownOutcome }), "SUPPORTED", "SUPPORTED_INTERNALLY", "a PASSED SOURCE_VERIFICATION check adds nothing and does not harm");
+  expect(run(supported("gstin"), { snapshot: unknownOutcome }), ...UNAVAILABLE, "a PASSED SOURCE_VERIFICATION check is impossible provenance and makes the snapshot unsuitable");
   const sourceVerified = buildSnapshot();
   sourceVerified.fieldConfidence.find((e: any) => e.field === "gstin").status = "SOURCE_VERIFIED";
   expect(run(supported("gstin"), { snapshot: sourceVerified }), ...UNAVAILABLE, "the engine never produces SOURCE_VERIFIED; a forged one is not affirmed");
@@ -339,6 +339,119 @@ test("documents[] cannot influence a schema-2 decision", () => {
   const missing = buildSnapshot({ docs: [{ id: "doc-udyam", docType: "UDYAM_CERTIFICATE", expiresInDays: 500 }] });
   missing.documentConfidence.push({ documentId: "doc-x", documentType: "GST_CERTIFICATE", status: "CROSS_CHECKED", confidence: 45, reason: "x", checks: [] });
   expect(run(current("GST_CERTIFICATE"), { snapshot: missing }), "INSUFFICIENT_EVIDENCE", "EVIDENCE_MISSING", "a document assessment is not an embedded evidence record");
+});
+
+// ---------------------------------------------------------------- remediation 1: strict authorization shape
+const AUTH_KEYS = ["channel", "status", "expiresAt", "revokedAt", "pinnedPassportId", "approvedFields", "approvedEvidenceTypes", "requester"] as const;
+const guestGrant = (overrides: Partial<AuthorizationContext> = {}): AuthorizationContext => grant({ channel: "GUEST_LINK", status: "ACTIVE", requester: null, ...overrides });
+const without = (value: object, key: string) => { const copy: any = { ...value }; delete copy[key]; return copy as AuthorizationContext; };
+
+test("REPRO: a consent whose revokedAt or expiresAt property is missing used to be treated as live and unexpired", () => {
+  // Before the fix these were SUPPORTED: a missing property was read as null ("not revoked", "never expires").
+  expect(run(supported("gstin"), { authorization: without(grant(), "revokedAt") }), ...DENIED, "revokedAt property missing");
+  expect(run(supported("gstin"), { authorization: without(grant(), "expiresAt") }), ...DENIED, "expiresAt property missing");
+  expect(run(supported("gstin"), { authorization: { ...grant(), revokedAt: undefined } as never }), ...DENIED, "revokedAt: undefined");
+  expect(run(supported("gstin"), { authorization: { ...grant(), expiresAt: undefined } as never }), ...DENIED, "expiresAt: undefined");
+  expect(run(supported("gstin"), { authorization: without(guestGrant(), "requester") }), ...DENIED, "guest link with the requester property missing");
+  expect(run(supported("gstin"), { authorization: { ...guestGrant(), requester: undefined } as never }), ...DENIED, "guest link with requester: undefined");
+});
+
+test("every authorisation property must be an explicit own property", () => {
+  for (const channelGrant of [grant, guestGrant]) for (const key of AUTH_KEYS) {
+    expect(run(supported("gstin"), { authorization: without(channelGrant(), key) }), ...DENIED, `${channelGrant === grant ? "consent" : "guest"} missing ${key}`);
+    expect(run(supported("gstin"), { authorization: { ...channelGrant(), [key]: undefined } as never }), ...DENIED, `undefined ${key}`);
+  }
+  const inherited = Object.create(grant()) as AuthorizationContext;
+  expect(run(supported("gstin"), { authorization: inherited }), ...DENIED, "inherited properties are not explicit");
+  for (const bad of [null, undefined, [], "x", 1, () => 1]) expect(run(supported("gstin"), { authorization: bad as never }), ...DENIED, `authorization ${typeof bad}`);
+});
+
+test("expiresAt and revokedAt accept only null or a full ISO instant, with channel-specific meaning", () => {
+  const malformed: unknown[] = ["", " ", "2026", "2026-10-20", "2026-10-20T12:00:00", "20 Oct 2026", "10/20/2026", "tomorrow", "not a date", "2027-13-45T00:00:00Z", 0, 1, 1792000000000, -1, true, false, {}, [], ["2027-01-01T00:00:00Z"], NaN, Infinity, new Date(day(5))];
+  for (const bad of malformed) {
+    expect(run(supported("gstin"), { authorization: { ...grant(), expiresAt: bad } as never }), ...DENIED, `consent expiresAt ${String(bad)}`);
+    expect(run(supported("gstin"), { authorization: { ...guestGrant(), expiresAt: bad } as never }), ...DENIED, `guest expiresAt ${String(bad)}`);
+    expect(run(supported("gstin"), { authorization: { ...grant(), revokedAt: bad } as never }), ...DENIED, `consent revokedAt ${String(bad)}`);
+    expect(run(supported("gstin"), { authorization: { ...guestGrant(), revokedAt: bad } as never }), ...DENIED, `guest revokedAt ${String(bad)}`);
+  }
+  for (const valid of ["2027-01-01T00:00:00Z", "2027-01-01T00:00:00.123Z", "2027-01-01T05:30:00+05:30", day(3)]) {
+    expect(run(supported("gstin"), { authorization: grant({ expiresAt: valid }) }), "SUPPORTED", "SUPPORTED_INTERNALLY", `consent expiresAt ${valid}`);
+    expect(run(supported("gstin"), { authorization: guestGrant({ expiresAt: valid }) }), "SUPPORTED", "SUPPORTED_INTERNALLY", `guest expiresAt ${valid}`);
+  }
+  expect(run(supported("gstin"), { authorization: grant({ expiresAt: null }) }), "SUPPORTED", "SUPPORTED_INTERNALLY", "a consent may legitimately never expire (explicit null)");
+  expect(run(supported("gstin"), { authorization: guestGrant({ expiresAt: null }) }), ...DENIED, "a guest link always expires");
+  for (const revoked of [day(-1), "2027-01-01T00:00:00Z", NOW]) {
+    expect(run(supported("gstin"), { authorization: grant({ revokedAt: revoked }) }), ...DENIED, "consent revokedAt must be null");
+    expect(run(supported("gstin"), { authorization: guestGrant({ revokedAt: revoked }) }), ...DENIED, "guest revokedAt must be null");
+  }
+});
+
+test("the evaluation instant is a strict ISO instant too", () => {
+  for (const bad of ["2026-10-20", "yesterday", "", undefined, null, 5, NaN]) expect(run(supported("gstin"), { now: bad as never }), ...DENIED, `now ${String(bad)}`);
+});
+
+test("the requester assurance record must be explicit as well: a missing authorizationExpiresAt is not 'no expiry'", () => {
+  const high = [...LOW_FIELDS, "turnoverBand"];
+  const record = { assuranceStatus: "AUTHORIZED", authorizationExpiresAt: day(30), authorizationScope: { fields: ["turnoverBand"], evidenceTypes: [] } };
+  expect(run(supported("gstin"), { authorization: grant({ approvedFields: high, requester: record }) }), "SUPPORTED", "SUPPORTED_INTERNALLY", "complete record");
+  for (const key of ["assuranceStatus", "authorizationExpiresAt", "authorizationScope"]) {
+    expect(run(supported("gstin"), { authorization: grant({ approvedFields: high, requester: without(record, key) as never }) }), ...DENIED, `HIGH scope, missing ${key}`);
+    expect(run(supported("gstin"), { authorization: grant({ requester: without({ assuranceStatus: "ORG_REVIEWED", authorizationExpiresAt: null, authorizationScope: null }, key) as never }) }), ...DENIED, `LOW scope, missing ${key}`);
+  }
+  expect(run(supported("gstin"), { authorization: grant({ requester: [] as never }) }), ...DENIED, "requester is an array");
+  expect(run(supported("gstin"), { authorization: grant({ requester: "x" as never }) }), ...DENIED, "requester is a string");
+  expect(run(supported("gstin"), { authorization: grant({ requester: { assuranceStatus: "ORG_REVIEWED", authorizationExpiresAt: "garbage", authorizationScope: null } }) }), ...DENIED, "malformed assurance expiry");
+});
+
+// ---------------------------------------------------------------- remediation 2: impossible source verification
+const crafted = (mutate: (snapshot: any) => void) => { const snapshot = buildSnapshot(); mutate(snapshot); return snapshot; };
+const ALL_REQUESTS: ConclusionRequest[] = [supported("gstin"), supported("udyamNumber"), noConflict("gstin"), noConflict("address"), noConflict("legalBusinessName"), current("GST_CERTIFICATE"), current("UDYAM_CERTIFICATE")];
+
+test("REPRO: a schema-2 evidence record with status SOURCE_VERIFIED used to count as valid current evidence", () => {
+  // Before the fix the record was accepted (SOURCE_VERIFIED is a recognised enum value) and the claim became SUPPORTED.
+  const snapshot = crafted((s) => { s.evidence.find((r: any) => r.documentId === "doc-gst").evidenceStatus = "SOURCE_VERIFIED"; s.documentConfidence.find((d: any) => d.documentId === "doc-gst").status = "SOURCE_VERIFIED"; });
+  for (const request of ALL_REQUESTS) expect(run(request, { snapshot }), ...UNAVAILABLE, JSON.stringify(request));
+});
+
+test("impossible provenance anywhere in a schema-2 snapshot makes it unsuitable for every positive conclusion", () => {
+  const forgeries: Array<[string, (snapshot: any) => void]> = [
+    ["evidence status SOURCE_VERIFIED (authorised record)", (s) => { s.evidence[0].evidenceStatus = "SOURCE_VERIFIED"; }],
+    ["evidence status SOURCE_VERIFIED (unauthorised record)", (s) => { s.evidence[1].evidenceStatus = "SOURCE_VERIFIED"; }],
+    ["field status SOURCE_VERIFIED (requested claim)", (s) => { s.fieldConfidence.find((f: any) => f.field === "gstin").status = "SOURCE_VERIFIED"; }],
+    ["field status SOURCE_VERIFIED (other claim)", (s) => { s.fieldConfidence.find((f: any) => f.field === "address").status = "SOURCE_VERIFIED"; }],
+    ["field SOURCE_VERIFICATION PASSED", (s) => { s.fieldConfidence.find((f: any) => f.field === "gstin").checks.find((c: any) => c.type === "SOURCE_VERIFICATION").result = "PASSED"; }],
+    ["field SOURCE_VERIFICATION WARNING", (s) => { s.fieldConfidence.find((f: any) => f.field === "gstin").checks.find((c: any) => c.type === "SOURCE_VERIFICATION").result = "WARNING"; }],
+    ["field SOURCE_VERIFICATION FAILED", (s) => { s.fieldConfidence.find((f: any) => f.field === "gstin").checks.find((c: any) => c.type === "SOURCE_VERIFICATION").result = "FAILED"; }],
+    ["field SOURCE_VERIFICATION in an unrelated claim", (s) => { s.fieldConfidence.find((f: any) => f.field === "ownerName").checks.push({ type: "SOURCE_VERIFICATION", result: "PASSED", reason: "forged" }); }],
+    ["evidence SOURCE_VERIFICATION PASSED", (s) => { s.evidence[0].checks.push({ type: "SOURCE_VERIFICATION", result: "PASSED", reason: "forged" }); }],
+    ["evidence crossCheckMethod from a government API", (s) => { s.evidence[0].crossCheckMethod = "GOVERNMENT_API"; }],
+    ["evidence crossCheckMethod missing", (s) => { delete s.evidence[0].crossCheckMethod; }],
+    ["evidence crossCheckMethod null", (s) => { s.evidence[0].crossCheckMethod = null; }],
+    ["sourceVerificationPerformed true", (s) => { s.sourceVerificationPerformed = true; }],
+    ["sourceVerificationPerformed missing", (s) => { delete s.sourceVerificationPerformed; }]
+  ];
+  for (const [name, forge] of forgeries) {
+    const snapshot = crafted(forge);
+    for (const request of ALL_REQUESTS) expect(run(request, { snapshot }), ...UNAVAILABLE, `${name} / ${JSON.stringify(request)}`);
+  }
+});
+
+test("a fully consistent, validator-shaped snapshot that claims authoritative verification cannot become SUPPORTED", () => {
+  const snapshot = crafted((s) => {
+    for (const record of s.evidence) { record.evidenceStatus = "SOURCE_VERIFIED"; record.confidence = 100; record.source = "GST_PORTAL"; record.crossCheckMethod = "GSTN_API"; record.checks.push({ type: "SOURCE_VERIFICATION", result: "PASSED", reason: "Verified against the GST portal." }); }
+    for (const document of s.documentConfidence) { document.status = "SOURCE_VERIFIED"; document.confidence = 100; }
+    for (const entry of s.fieldConfidence) { entry.status = "SOURCE_VERIFIED"; entry.confidence = 100; entry.checks.find((c: any) => c.type === "SOURCE_VERIFICATION").result = "PASSED"; }
+  });
+  for (const request of ALL_REQUESTS) expect(run(request, { snapshot }), ...UNAVAILABLE, JSON.stringify(request));
+  const decision = JSON.stringify(run(supported("gstin"), { snapshot }));
+  assert(!/verified|GST_PORTAL|GSTN_API|100/.test(decision), `forged provenance echoed: ${decision}`);
+});
+
+test("honest data is unaffected: the only provenance the engine produces is still accepted", () => {
+  const snapshot = buildSnapshot();
+  assert(snapshot.evidence.every((r: any) => r.crossCheckMethod === "INTERNAL_METADATA_CHECK"), "engine records the internal method");
+  assert(snapshot.fieldConfidence.every((f: any) => f.checks.filter((c: any) => c.type === "SOURCE_VERIFICATION").every((c: any) => c.result === "NOT_APPLICABLE")), "engine never claims source verification");
+  for (const request of ALL_REQUESTS) assert(run(request, { snapshot }).verdict === "SUPPORTED", JSON.stringify(request));
 });
 
 // ---------------------------------------------------------------- hidden-data behaviour (stated narrowly; no noninterference claim)
@@ -445,7 +558,7 @@ test("custom policies cannot widen what an unknown field or docType may request"
 
 test("purity: the module has no I/O, clock, randomness, environment, network or database access", () => {
   const forbidden = [/from "node:/, /from "(fs|http|https|net|child_process|crypto)"/, /@prisma\/client/, /config\/prisma/, /config\/env/, /from "express"/, /\bDate\.now\(/, /new Date\(\s*\)/, /Math\.random/, /process\.env/, /\bfetch\(/, /console\./, /require\(/];
-  for (const file of ["evidence-firewall", "firewall-authorization", "firewall-policy", "firewall-snapshot-reader", "firewall.types"]) {
+  for (const file of ["evidence-firewall", "firewall-authorization", "firewall-policy", "firewall-snapshot-reader", "firewall-time", "firewall.types"]) {
     const source = readFileSync(new URL(`../src/modules/evidenceFirewall/${file}.ts`, import.meta.url), "utf8");
     for (const pattern of forbidden) assert(!pattern.test(source), `${file}.ts matches ${pattern}`);
     for (const line of source.split("\n")) if (/^import /.test(line)) assert(/from "\.\/|from "\.\.\/\.\.\/utils\/disclosureCatalogue\.js"/.test(line), `${file}.ts has an unexpected import: ${line}`);
