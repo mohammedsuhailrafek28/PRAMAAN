@@ -497,7 +497,8 @@ async function main() {
       token: buyerToken,
       body: {
         businessGstin: businessInput.gstin,
-        requestedFields: ["legalBusinessName", "gstin", "udyamNumber", "summary"]
+        requestedFields: ["legalBusinessName", "gstin", "udyamNumber", "summary"],
+        requestedEvidenceTypes: ["GST_CERTIFICATE", "UDYAM_CERTIFICATE"]
       }
     });
     const consentId = consentCreate.data.consentRequestId;
@@ -525,6 +526,7 @@ async function main() {
       token: msmeToken,
       body: {
         approvedFields: ["legalBusinessName", "gstin", "udyamNumber", "summary"],
+        approvedEvidenceTypes: ["GST_CERTIFICATE", "UDYAM_CERTIFICATE"],
         durationDays: 7
       }
     });
@@ -573,6 +575,21 @@ async function main() {
     assert(getActions(audit.data).includes("TRUST_VIEW_OPENED"), "TRUST_VIEW_OPENED audit missing");
     pass("U. buyer dynamic trust view returns only approved fields, no report data, and records VIEWED");
 
+    const registeredConclusion = await request("POST", `/api/trust-view/${consentId}/conclusions`, {
+      token: buyerToken,
+      body: { kind: "FIELD_SUPPORTED_BY_EVIDENCE", field: "gstin" }
+    });
+    assert(registeredConclusion.data.conclusion.result === "CONFIRMED", "registered Firewall conclusion was not confirmed");
+    assert(registeredConclusion.data.conclusion.basis === "INTERNAL_DETERMINISTIC_CHECKS", "registered Firewall basis leaked an unexpected source");
+    assert(!containsKey(registeredConclusion.data, "evidenceIds") && !containsKey(registeredConclusion.data, "snapshotJson"), "Firewall response leaked internal data");
+    const malformedConclusion = await request("POST", `/api/trust-view/${consentId}/conclusions`, {
+      token: buyerToken,
+      body: { kind: "FIELD_SUPPORTED_BY_EVIDENCE", field: "gstin", extra: "ignored-must-not-be-accepted" },
+      expected: [400]
+    });
+    assert(malformedConclusion.data.error.code === "VALIDATION_ERROR", "malformed Firewall request was not rejected");
+    pass("U2. registered Firewall conclusions are coarse, pinned and strict about request shape");
+
     const otherBuyer = await request("POST", "/api/auth/register", {
       body: {
         role: "BUYER",
@@ -582,6 +599,11 @@ async function main() {
         password: "password123"
       }
     });
+    const otherBuyerConclusion = await request("POST", `/api/trust-view/${consentId}/conclusions`, {
+      token: otherBuyer.data.token,
+      body: { kind: "FIELD_NOT_CONTRADICTED", field: "gstin" }
+    });
+    assert(otherBuyerConclusion.data.conclusion.result === "NOT_DISCLOSABLE", "cross-user Firewall conclusion was not uniformly denied");
     await expectBlocked(
       "GET",
       `/api/trust-view/${consentId}`,
@@ -618,6 +640,11 @@ async function main() {
       "revoked trust view"
     );
     assert(!revokedView.data.sharedFields, "revoked response leaked sharedFields");
+    const revokedConclusion = await request("POST", `/api/trust-view/${consentId}/conclusions`, {
+      token: buyerToken,
+      body: { kind: "FIELD_NOT_CONTRADICTED", field: "gstin" }
+    });
+    assert(revokedConclusion.data.conclusion.result === "NOT_DISCLOSABLE", "revoked conclusion was not denied");
     pass("X. buyer trust-view after revoke is blocked with CONSENT_REVOKED");
 
     const expiryConsentCreate = await request("POST", "/api/consent-requests", {
@@ -634,6 +661,11 @@ async function main() {
     const expiredIncoming = await request("GET", "/api/consent-requests?scope=incoming", { token: msmeToken });
     assert(expiredIncoming.data.requests.find((item: Json) => item.id === expiryConsentId)?.status === "EXPIRED", "expired consent was not materialized in incoming list");
     await expectBlocked("GET", `/api/trust-view/${expiryConsentId}`, buyerToken, ["CONSENT_EXPIRED"], "expired registered consent");
+    const expiredConclusion = await request("POST", `/api/trust-view/${expiryConsentId}/conclusions`, {
+      token: buyerToken,
+      body: { kind: "FIELD_NOT_CONTRADICTED", field: "legalBusinessName" }
+    });
+    assert(expiredConclusion.data.conclusion.result === "NOT_DISCLOSABLE", "expired conclusion was not denied");
     await expectBlocked("GET", `/api/trust-view/${expiryConsentId}`, buyerToken, ["CONSENT_EXPIRED"], "repeated expired registered consent");
     audit = await request("GET", "/api/audit-logs", { token: msmeToken });
     assert(getActions(audit.data).filter((action: string) => action === "CONSENT_EXPIRED").length === 1, "repeated expiry reads duplicated CONSENT_EXPIRED audit");
@@ -685,6 +717,11 @@ async function main() {
     assert(guestView.data.sharedFields.summary.source === "INTERNAL_DETERMINISTIC_CHECKS" && guestView.data.sharedFields.summary.evidenceStatus === "CROSS_CHECKED", "guest summary provenance missing");
     assert(guestView.data.evidence.length === 2, "guest evidence scope missing");
     assert(!JSON.stringify(guestView.data).includes("filePath"), "guest file path leaked");
+    const guestConclusion = await request("POST", `/api/public/verify/${guestToken}/conclusions`, {
+      body: { kind: "FIELD_NOT_CONTRADICTED", field: "gstin" }
+    });
+    assert(guestConclusion.data.conclusion.result === "CONFIRMED", "guest Firewall conclusion was not confirmed");
+    assert(!containsKey(guestConclusion.data, "evidenceIds") && !containsKey(guestConclusion.data, "snapshotJson"), "guest Firewall response leaked internal data");
     const limitedGrant = await request("POST", "/api/access-grants", { token: msmeToken, body: { purpose: "Other", scope: { fields: ["gstin"] }, durationHours: 24 } });
     const limitedToken = (limitedGrant.data.grant.secureUrl as string).split("/verify/")[1];
     const limitedView = await request("GET", `/api/public/verify/${limitedToken}`);
@@ -695,11 +732,19 @@ async function main() {
 
     await expectBlocked("GET", "/api/public/verify/not-a-real-token", undefined, ["INVALID_ACCESS_LINK"], "random guest token");
     await expectBlocked("GET", "/api/public/verify/abc", undefined, ["INVALID_ACCESS_LINK"], "malformed guest token");
+    const deniedGuestConclusion = await request("POST", "/api/public/verify/not-a-real-token/conclusions", {
+      body: { kind: "FIELD_NOT_CONTRADICTED", field: "gstin" }
+    });
+    assert(deniedGuestConclusion.data.conclusion.result === "NOT_DISCLOSABLE", "unknown guest conclusion was not uniformly denied");
     const grants = await request("GET", "/api/access-grants", { token: msmeToken });
     assert(grants.data.grants.some((item: Json) => item.id === guestGrant.data.grant.id && item.lastAccessedAt), "active access last accessed missing");
     const revokedGrant = await request("PATCH", `/api/access-grants/${guestGrant.data.grant.id}/revoke`, { token: msmeToken });
     assert(revokedGrant.data.grant.status === "REVOKED", "guest grant not revoked");
     await expectBlocked("GET", `/api/public/verify/${guestToken}`, undefined, ["ACCESS_REVOKED"], "revoked guest token");
+    const revokedGuestConclusion = await request("POST", `/api/public/verify/${guestToken}/conclusions`, {
+      body: { kind: "FIELD_NOT_CONTRADICTED", field: "gstin" }
+    });
+    assert(revokedGuestConclusion.data.conclusion.result === "NOT_DISCLOSABLE", "revoked guest conclusion was not denied");
     await expectBlocked("PATCH", `/api/access-grants/${guestGrant.data.grant.id}/revoke`, otherMsme.data.token, ["NOT_FOUND"], "other MSME grant revoke");
     pass("AB. external link revocation, ownership enforcement, and invalid-token behavior are server-enforced");
 
